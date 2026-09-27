@@ -412,6 +412,20 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
      border-radius:50%;background:var(--lav)}
 .timeline .when{font-size:.72rem;color:var(--soft)}
 .timeline .what{font-size:.89rem;color:var(--mid);white-space:pre-wrap}
+/* Guided tour */
+.introjs-tooltip{border-radius:14px !important;font-family:inherit !important;
+  max-width:330px !important;box-shadow:0 24px 48px -26px rgba(36,31,43,.5) !important}
+.introjs-tooltiptext{font-size:1rem !important;line-height:1.55 !important;color:var(--mid) !important;
+  padding:18px 18px 8px !important}
+.introjs-tooltip-title{font-size:1.1rem !important;font-weight:700 !important;color:var(--ink) !important}
+.introjs-button{border-radius:9px !important;font-family:inherit !important;font-size:.9rem !important;
+  padding:10px 16px !important;text-shadow:none !important}
+.introjs-nextbutton{background:var(--deep) !important;color:#fff !important;border-color:var(--deep) !important}
+.introjs-prevbutton,.introjs-skipbutton{background:var(--card) !important;color:var(--mid) !important;
+  border-color:var(--line) !important}
+.introjs-helperLayer{border-radius:13px !important}
+.tour-link{background:none;border:0;color:#fff;opacity:.9;font-size:.8rem;font-family:inherit;
+  text-decoration:underline;cursor:pointer;padding:0}
 .brief{margin-top:14px;padding:13px 14px;border-radius:11px;
   background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
   font-size:.95rem;line-height:1.55;color:rgba(255,255,255,.94)}
@@ -464,7 +478,9 @@ footer.credit b{font-weight:600;color:var(--mid)}
 
 const layout = (title, body) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><style>${CSS}</style></head><body>${body}
+<title>${esc(title)}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/introjs.min.css">
+<style>${CSS}</style></head><body>${body}
 <footer class="credit">Custom CRM by <b>Activate</b></footer>
 </body></html>`;
 
@@ -596,13 +612,16 @@ app.get('/', requireAuth, async (req, res) => {
       ? 'Nothing overdue — these came in since you last looked.'
       : 'Nothing due and nothing new. Spam has been filed on its own.';
 
+  let firstRow = true;
   const items = rows.length ? rows.map(l => {
     const overdue = l.next_follow_up &&
       new Date(l.next_follow_up).toISOString().slice(0, 10) <= today &&
       !['booked', 'cold'].includes(l.status);
     const when = new Date(l.received_at).toLocaleDateString('en-US',
       { month: 'short', day: 'numeric' });
-    return `<div class="lead ${l.is_spam ? 'spam' : ''} ${overdue ? 'overdue' : ''}">
+    const rowId = firstRow ? ' id="tour-row"' : '';
+    firstRow = false;
+    return `<div class="lead ${l.is_spam ? 'spam' : ''} ${overdue ? 'overdue' : ''}"${rowId}>
       <input type="checkbox" name="ids" value="${l.id}" form="bulk">
       <div class="body">
         <div class="meta">
@@ -629,9 +648,11 @@ app.get('/', requireAuth, async (req, res) => {
   }).join('') : `<div class="empty">Nothing here.</div>`;
 
   res.send(layout('Leads', `
-    <header><h1>Melody &mdash; leads</h1><a href="/logout">Sign out</a></header>
+    <header><h1>Melody &mdash; leads</h1>
+      <span><button class="tour-link" id="tour-start" type="button">Show me around</button>
+      &nbsp;&nbsp;<a href="/logout">Sign out</a></span></header>
     <div class="wrap">
-      <div class="summary">
+      <div class="summary" id="tour-summary">
         <div class="hello">${esc(greeting)}</div>
         <p class="line">${esc(headline)}</p>
         <div class="sub">${esc(subline)}</div>
@@ -642,7 +663,7 @@ app.get('/', requireAuth, async (req, res) => {
           <div class="stat"><b data-to="${n.c_booked}">0</b><span>Booked</span></div>
         </div>
       </div>
-      <div class="tabs">${tabs}</div>
+      <div class="tabs" id="tour-tabs">${tabs}</div>
       <form class="search" method="get" action="/">
         <input type="hidden" name="view" value="${esc(view)}">
         <input name="q" value="${esc(q)}" placeholder="Search name, email, organisation, message">
@@ -650,7 +671,7 @@ app.get('/', requireAuth, async (req, res) => {
       </form>
       <form id="bulk" method="post" action="/bulk">
         <input type="hidden" name="back" value="${esc(view)}">
-        <div class="bulkbar">
+        <div class="bulkbar" id="tour-bulk">
           <label><input type="checkbox" onclick="document.querySelectorAll('input[name=ids]').forEach(function(c){c.checked=event.target.checked})"> All</label>
           <select name="action">
             <option value="spam">Mark as spam</option>
@@ -685,6 +706,56 @@ app.get('/', requireAuth, async (req, res) => {
         }
         requestAnimationFrame(step);
       });
+    })();
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
+    <script>
+    (function(){
+      function steps(){
+        var s = [{
+          title: 'Welcome',
+          intro: 'This is everything that came in through your website. Spam is filed separately, so what you see here is worth reading.'
+        }, {
+          element: document.getElementById('tour-summary'),
+          title: 'Start here',
+          intro: 'A short summary of what is waiting, and the three numbers that matter: what is due, what is new, and what you have booked.'
+        }, {
+          element: document.getElementById('tour-tabs'),
+          title: 'Moving around',
+          intro: 'Due shows anything you said you would come back to. The others sort by where each enquiry has got to, or what it is about.'
+        }];
+        var row = document.getElementById('tour-row');
+        if (row) s.push({
+          element: row,
+          title: 'One enquiry',
+          intro: 'Tap the name to read the whole message and see a reply already drafted for you. Or use the buttons to put it off until tomorrow, next week, or mark that you have replied.'
+        });
+        var bulk = document.getElementById('tour-bulk');
+        if (bulk) s.push({
+          element: bulk,
+          title: 'Several at once',
+          intro: 'Tick a few and act on all of them together. Useful when several arrive at the same time.'
+        });
+        s.push({
+          title: 'That is it',
+          intro: 'Nothing here sends an email on its own. Replies are drafted for you, and you send them yourself. You can bring this tour back any time from Show me around.'
+        });
+        return s;
+      }
+      function run(){
+        introJs().setOptions({
+          steps: steps(),
+          nextLabel: 'Next', prevLabel: 'Back', doneLabel: 'Got it',
+          showBullets: false, showProgress: true, exitOnOverlayClick: false,
+          scrollToElement: true
+        }).oncomplete(seen).onexit(seen).start();
+      }
+      function seen(){ try { localStorage.setItem('mv_tour_seen','1'); } catch(e){} }
+      var btn = document.getElementById('tour-start');
+      if (btn) btn.addEventListener('click', run);
+      try {
+        if (!localStorage.getItem('mv_tour_seen')) setTimeout(run, 700);
+      } catch(e){}
     })();
     </script>`));
 });
