@@ -441,8 +441,10 @@ header{background:var(--purple);color:#fff;padding:14px 18px;position:sticky;top
        display:flex;justify-content:space-between;align-items:center;gap:10px}
 header h1{margin:0;font-size:1rem;font-weight:600;letter-spacing:.01em;
   display:flex;align-items:center;gap:9px}
-.hdr-logo{height:30px;width:auto;display:block;flex:none;
-  background:#fff;border-radius:8px;padding:3px 4px}
+.hdr-logo{height:38px;width:38px;object-fit:contain;display:block;flex:none;padding:5px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,.95) 0%,rgba(255,255,255,.86) 38%,
+             rgba(255,255,255,.28) 60%,rgba(255,255,255,0) 72%)}
 header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .hdr-nav{display:flex;gap:14px;align-items:center}
 .wrap{max-width:900px;margin:0 auto;padding:16px 14px 80px}
@@ -598,8 +600,10 @@ footer.credit b{font-weight:600;color:var(--mid)}
 #signin-canvas.on{opacity:.55}
 .signin{position:relative;z-index:2;width:100%;max-width:400px;margin-top:9vh}
 .signin .mark{display:flex;align-items:center;gap:12px;margin-bottom:24px}
-.signin-logo{width:54px;height:54px;object-fit:contain;flex:none;display:block;
-  background:rgba(255,255,255,.94);border-radius:14px;padding:6px}
+.signin-logo{width:74px;height:74px;object-fit:contain;flex:none;display:block;padding:12px;
+  border-radius:50%;margin:-8px -6px -8px -10px;
+  background:radial-gradient(circle,rgba(255,255,255,.95) 0%,rgba(255,255,255,.86) 36%,
+             rgba(255,255,255,.3) 58%,rgba(255,255,255,0) 72%)}
 .signin .mark .name{font-weight:700;font-size:1.08rem;letter-spacing:-.01em;line-height:1.2;color:#fff}
 .signin .mark .role{font-size:.84rem;color:rgba(255,255,255,.72);line-height:1.35}
 .signin .card{background:rgba(255,255,255,.96);border:1px solid rgba(255,255,255,.5);
