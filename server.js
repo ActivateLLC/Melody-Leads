@@ -442,30 +442,41 @@ body.tour-on header{position:static !important}
 footer.credit{text-align:center;padding:26px 16px 34px;font-size:.8rem;color:var(--soft);
   letter-spacing:.02em}
 footer.credit b{font-weight:600;color:var(--mid)}
-.signin-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;
-  padding:24px;background:
-    radial-gradient(1100px 520px at 50% -8%, #EDEAF7 0%, rgba(237,234,247,0) 62%),
-    var(--paper);}
-.signin{width:100%;max-width:400px}
-.signin .mark{display:flex;align-items:center;gap:11px;margin-bottom:26px}
-.signin-logo{width:52px;height:52px;object-fit:contain;flex:none;display:block}
-.signin .mark .name{font-weight:700;font-size:1.05rem;letter-spacing:-.01em;line-height:1.2}
-.signin .mark .role{font-size:.82rem;color:var(--soft);line-height:1.3}
-.signin .card{background:var(--card);border:1px solid var(--line);border-radius:18px;
-  padding:26px 24px 24px;box-shadow:0 26px 50px -34px rgba(36,31,43,.42)}
-.signin h1{margin:0 0 6px;font-size:1.28rem;font-weight:700;letter-spacing:-.015em}
+.signin-wrap{position:relative;min-height:100vh;display:flex;align-items:center;
+  justify-content:center;padding:24px;overflow:hidden;background:#2A2440}
+.signin-photo{position:absolute;inset:0;background-image:url('https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/6aa8b14c4402034b6c3745df_melody-vachal-speaking.jpg');
+  background-size:cover;background-position:52% 18%;filter:saturate(.85)}
+.signin-veil{position:absolute;inset:0;
+  background:linear-gradient(165deg, rgba(42,36,64,.82) 0%, rgba(92,86,149,.78) 46%,
+                                     rgba(26,22,40,.9) 100%)}
+#signin-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;
+  pointer-events:none;opacity:0;transition:opacity 1.2s ease}
+#signin-canvas.on{opacity:.55}
+.signin{position:relative;z-index:2;width:100%;max-width:400px}
+.signin .mark{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.signin-logo{width:54px;height:54px;object-fit:contain;flex:none;display:block;
+  background:rgba(255,255,255,.94);border-radius:14px;padding:6px}
+.signin .mark .name{font-weight:700;font-size:1.08rem;letter-spacing:-.01em;line-height:1.2;color:#fff}
+.signin .mark .role{font-size:.84rem;color:rgba(255,255,255,.72);line-height:1.35}
+.signin .card{background:rgba(255,255,255,.96);border:1px solid rgba(255,255,255,.5);
+  border-radius:20px;padding:26px 24px 24px;
+  box-shadow:0 34px 70px -30px rgba(12,9,22,.75);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.signin h1{margin:0 0 6px;font-size:1.3rem;font-weight:700;letter-spacing:-.015em}
 .signin .lede{margin:0 0 20px;font-size:.95rem;color:var(--mid);line-height:1.5}
 .signin label{display:block;font-size:.78rem;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--soft);margin-bottom:7px}
 .signin input{width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:11px;
   font-size:1.05rem;background:var(--paper);min-height:52px;font-family:inherit}
 .signin input:focus{outline:none;border-color:var(--lav);box-shadow:0 0 0 4px var(--lav-soft);
-  background:var(--card)}
+  background:#fff}
 .signin button{width:100%;margin-top:16px;padding:15px;border:0;border-radius:11px;
   background:var(--purple);color:#fff;font-weight:600;font-size:1rem;min-height:52px;
   font-family:inherit;cursor:pointer}
 .signin button:active{filter:brightness(.93)}
-.signin .foot{margin-top:18px;font-size:.8rem;color:var(--soft);text-align:center;line-height:1.5}
+.signin .foot{margin-top:18px;font-size:.82rem;color:rgba(255,255,255,.72);
+  text-align:center;line-height:1.5}
+@media (prefers-reduced-motion: reduce){#signin-canvas{display:none}}
 .err{color:#9A5A48;font-size:.84rem;margin-bottom:9px}
 
 .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
@@ -494,26 +505,111 @@ const layout = (title, body) => `<!doctype html><html lang="en"><head>
 /* ---------------------------------------------------------------- login */
 
 app.get('/login', (req, res) => res.send(layout('Sign in', `
-  <div class="signin-wrap"><div class="signin">
-    <div class="mark">
-      <img class="signin-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="Melody Vachal">
-      <div>
-        <div class="name">Melody Vachal</div>
-        <div class="role">Enquiries &amp; follow-ups</div>
+  <div class="signin-wrap">
+    <div class="signin-photo"></div>
+    <div class="signin-veil"></div>
+    <canvas id="signin-canvas"></canvas>
+    <div class="signin">
+      <div class="mark">
+        <img class="signin-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="Melody Vachal">
+        <div>
+          <div class="name">Melody Vachal</div>
+          <div class="role">Enquiries &amp; follow-ups</div>
+        </div>
       </div>
+      <div class="card">
+        <h1>Welcome back</h1>
+        <p class="lede">Everything that came in through melodyvachal.com, in one place.</p>
+        ${req.query.bad ? '<div class="err">That password did not work. Try again.</div>' : ''}
+        <form method="post" action="/login">
+          <label for="pw">Password</label>
+          <input id="pw" type="password" name="password" autofocus autocomplete="current-password">
+          <button type="submit">Sign in</button>
+        </form>
+      </div>
+      <p class="foot">Spam is filed separately, so this list stays worth reading.</p>
     </div>
-    <div class="card">
-      <h1>Welcome back</h1>
-      <p class="lede">Everything that came in through melodyvachal.com, in one place.</p>
-      ${req.query.bad ? '<div class="err">That password did not work. Try again.</div>' : ''}
-      <form method="post" action="/login">
-        <label for="pw">Password</label>
-        <input id="pw" type="password" name="password" autofocus autocomplete="current-password">
-        <button type="submit">Sign in</button>
-      </form>
-    </div>
-    <p class="foot">Spam is filed separately, so this list stays worth reading.</p>
-  </div></div>`)));
+  </div>
+  <script>
+  // Loaded after the form is usable, so signing in is never delayed.
+  (function(){
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return;
+    if (navigator.connection && navigator.connection.saveData) return;
+    var canvas = document.getElementById('signin-canvas');
+    if (!canvas) return;
+
+    function start(){
+      if (typeof THREE === 'undefined') return;
+      var w = canvas.clientWidth, h = canvas.clientHeight;
+      var renderer;
+      try {
+        renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+      } catch (e) { return; }
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(w, h, false);
+
+      var scene = new THREE.Scene();
+      var camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
+      camera.position.z = 16;
+
+      // A slow drift of small motes — quiet, not a screensaver.
+      var COUNT = 220;
+      var pos = new Float32Array(COUNT * 3);
+      var drift = new Float32Array(COUNT);
+      for (var i = 0; i < COUNT; i++) {
+        pos[i*3]     = (Math.random() - 0.5) * 34;
+        pos[i*3 + 1] = (Math.random() - 0.5) * 24;
+        pos[i*3 + 2] = (Math.random() - 0.5) * 14;
+        drift[i] = 0.1 + Math.random() * 0.22;
+      }
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      var mat = new THREE.PointsMaterial({
+        color: 0xC7C4E2, size: 0.13, transparent: true, opacity: 0.85,
+        depthWrite: false, blending: THREE.AdditiveBlending
+      });
+      var points = new THREE.Points(geo, mat);
+      scene.add(points);
+
+      var raf, running = true;
+      function frame(){
+        if (!running) return;
+        var p = geo.attributes.position.array;
+        for (var i = 0; i < COUNT; i++) {
+          p[i*3 + 1] += drift[i] * 0.012;
+          if (p[i*3 + 1] > 12) p[i*3 + 1] = -12;
+        }
+        geo.attributes.position.needsUpdate = true;
+        points.rotation.y += 0.0007;
+        renderer.render(scene, camera);
+        raf = requestAnimationFrame(frame);
+      }
+      canvas.classList.add('on');
+      frame();
+
+      window.addEventListener('resize', function(){
+        var nw = canvas.clientWidth, nh = canvas.clientHeight;
+        camera.aspect = nw / nh; camera.updateProjectionMatrix();
+        renderer.setSize(nw, nh, false);
+      });
+      document.addEventListener('visibilitychange', function(){
+        running = !document.hidden;
+        if (running) frame(); else cancelAnimationFrame(raf);
+      });
+    }
+
+    function load(){
+      var sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+      sc.async = true;
+      sc.onload = start;
+      document.body.appendChild(sc);
+    }
+    if (document.readyState === 'complete') load();
+    else window.addEventListener('load', load);
+  })();
+  </script>`)));
 
 app.post('/login', (req, res) => {
   if (PASSWORD && req.body.password === PASSWORD) {
