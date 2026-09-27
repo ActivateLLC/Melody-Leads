@@ -883,7 +883,14 @@ app.get('/', requireAuth, async (req, res) => {
         <p class="who"><a href="/lead/${l.id}">${esc(l.name || l.email || 'No name')}</a></p>
         <div class="meta">${esc(l.organization || '')}${l.email ? ' &middot; ' + esc(l.email) : ''}</div>
         ${l.message ? `<div class="snip">${esc(String(l.message).slice(0, 160))}</div>` : ''}
-        ${l.is_spam ? '' : `<div class="quick">
+        ${l.is_spam ? `<div class="quick">
+          <form method="post" action="/lead/${l.id}/quick"><input type="hidden" name="to" value="new">
+            <input type="hidden" name="back" value="${esc(view)}"><button type="submit">Not spam</button></form>
+          <form method="post" action="/lead/${l.id}/delete"
+                onsubmit="return confirm('Delete this permanently?')">
+            <input type="hidden" name="back" value="${esc(view)}">
+            <button type="submit" class="muted">Delete</button></form>
+        </div>` : `<div class="quick">
           <form method="post" action="/lead/${l.id}/snooze"><input type="hidden" name="days" value="1">
             <input type="hidden" name="back" value="${esc(view)}"><button type="submit">Tomorrow</button></form>
           <form method="post" action="/lead/${l.id}/snooze"><input type="hidden" name="days" value="7">
@@ -943,6 +950,7 @@ app.get('/', requireAuth, async (req, res) => {
             <option value="contacted">Mark contacted</option>
             <option value="booked">Mark booked</option>
             <option value="cold">Mark cold</option>
+            <option value="delete">Delete permanently</option>
           </select>
           <button type="submit">Apply</button>
         </div>
@@ -1188,6 +1196,9 @@ app.post('/bulk', requireAuth, async (req, res) => {
     } else if (action === 'not_spam') {
       await pool.query(`UPDATE leads SET is_spam=false, status='new', spam_reason=NULL,
         updated_at=now() WHERE id = ANY($1)`, [ids]);
+    } else if (action === 'delete') {
+      await pool.query('DELETE FROM leads WHERE id = ANY($1)', [ids]);
+      return res.redirect('/?view=' + encodeURIComponent(back));
     } else if (['contacted', 'booked', 'cold'].includes(action)) {
       await pool.query(`UPDATE leads SET status=$1, is_spam=false, updated_at=now()
         WHERE id = ANY($2)`, [action, ids]);
@@ -1349,6 +1360,13 @@ app.post('/engagements/sync', async (req, res) => {
     n++;
   }
   res.json({ ok: true, synced: n });
+});
+
+app.post('/lead/:id/delete', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+  await pool.query('DELETE FROM leads WHERE id=$1', [id]);   // events cascade
+  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'all'));
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
