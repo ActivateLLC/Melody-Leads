@@ -553,38 +553,108 @@ app.get('/login', (req, res) => res.send(layout('Sign in', `
       var camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
       camera.position.z = 16;
 
-      // A slow drift of small motes — quiet, not a screensaver.
-      var COUNT = 220;
-      var pos = new Float32Array(COUNT * 3);
-      var drift = new Float32Array(COUNT);
+      // A drifting flock: each mote wanders its own path, shimmers on its own
+      // wingbeat, and carries one of the colours from her hummingbird.
+      var COUNT = 260;
+      var pos   = new Float32Array(COUNT * 3);
+      var col   = new Float32Array(COUNT * 3);
+      var size  = new Float32Array(COUNT);
+      var seed  = new Float32Array(COUNT);
+      var rise  = new Float32Array(COUNT);
+      var sway  = new Float32Array(COUNT);
+      var beat  = new Float32Array(COUNT);
+      var baseX = new Float32Array(COUNT);
+
+      var HUES = [[0.78,0.77,0.89],[0.45,0.76,0.74],[0.88,0.62,0.66]];
+
       for (var i = 0; i < COUNT; i++) {
-        pos[i*3]     = (Math.random() - 0.5) * 34;
-        pos[i*3 + 1] = (Math.random() - 0.5) * 24;
-        pos[i*3 + 2] = (Math.random() - 0.5) * 14;
-        drift[i] = 0.1 + Math.random() * 0.22;
+        baseX[i]     = (Math.random() - 0.5) * 36;
+        pos[i*3]     = baseX[i];
+        pos[i*3 + 1] = (Math.random() - 0.5) * 26;
+        pos[i*3 + 2] = (Math.random() - 0.5) * 16;
+        var c = HUES[(Math.random() * HUES.length) | 0];
+        col[i*3] = c[0]; col[i*3+1] = c[1]; col[i*3+2] = c[2];
+        size[i] = 0.07 + Math.random() * 0.20;
+        seed[i] = Math.random() * Math.PI * 2;
+        rise[i] = 0.05 + Math.random() * 0.20;
+        sway[i] = 0.5 + Math.random() * 1.6;
+        beat[i] = 5 + Math.random() * 9;
       }
+
       var geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      var mat = new THREE.PointsMaterial({
-        color: 0xC7C4E2, size: 0.13, transparent: true, opacity: 0.85,
-        depthWrite: false, blending: THREE.AdditiveBlending
+      geo.setAttribute('customColor', new THREE.BufferAttribute(col, 3));
+      geo.setAttribute('customSize', new THREE.BufferAttribute(size, 1));
+      geo.setAttribute('alpha', new THREE.BufferAttribute(new Float32Array(COUNT), 1));
+
+      var mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: h * 0.5 } },
+        vertexShader: [
+          'attribute vec3 customColor;',
+          'attribute float customSize;',
+          'attribute float alpha;',
+          'uniform float uScale;',
+          'varying vec3 vColor;',
+          'varying float vAlpha;',
+          'void main(){',
+          '  vColor = customColor; vAlpha = alpha;',
+          '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+          '  gl_PointSize = customSize * (uScale / -mv.z);',
+          '  gl_Position = projectionMatrix * mv;',
+          '}'
+        ].join('\n'),
+        fragmentShader: [
+          'varying vec3 vColor;',
+          'varying float vAlpha;',
+          'void main(){',
+          '  vec2 d = gl_PointCoord - vec2(0.5);',
+          '  float r = length(d);',
+          '  if (r > 0.5) discard;',
+          '  float soft = smoothstep(0.5, 0.06, r);',
+          '  gl_FragColor = vec4(vColor, soft * vAlpha);',
+          '}'
+        ].join('\n')
       });
+
       var points = new THREE.Points(geo, mat);
       scene.add(points);
 
+      var tiltX = 0, tiltY = 0, aimX = 0, aimY = 0;
+      function aim(e){
+        var t = (e.touches && e.touches[0]) || e;
+        if (t.clientX == null) return;
+        aimX = (t.clientX / window.innerWidth - 0.5) * 2;
+        aimY = (t.clientY / window.innerHeight - 0.5) * 2;
+      }
+      window.addEventListener('mousemove', aim, { passive: true });
+      window.addEventListener('touchmove', aim, { passive: true });
+
+      var t0 = performance.now();
       var raf, running = true;
       function frame(){
         if (!running) return;
+        var t = (performance.now() - t0) / 1000;
         var p = geo.attributes.position.array;
+        var a = geo.attributes.alpha.array;
         for (var i = 0; i < COUNT; i++) {
-          p[i*3 + 1] += drift[i] * 0.012;
-          if (p[i*3 + 1] > 12) p[i*3 + 1] = -12;
+          p[i*3 + 1] += rise[i] * 0.014;
+          if (p[i*3 + 1] > 13) { p[i*3 + 1] = -13; baseX[i] = (Math.random() - 0.5) * 36; }
+          p[i*3] = baseX[i] + Math.sin(t * 0.5 + seed[i]) * sway[i];
+          a[i] = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * beat[i] + seed[i]));
         }
         geo.attributes.position.needsUpdate = true;
-        points.rotation.y += 0.0007;
+        geo.attributes.alpha.needsUpdate = true;
+
+        tiltX += (aimX * 0.25 - tiltX) * 0.04;
+        tiltY += (aimY * 0.18 - tiltY) * 0.04;
+        points.rotation.y = tiltX + t * 0.02;
+        points.rotation.x = -tiltY;
+
         renderer.render(scene, camera);
         raf = requestAnimationFrame(frame);
       }
+
       canvas.classList.add('on');
       frame();
 
@@ -592,6 +662,7 @@ app.get('/login', (req, res) => res.send(layout('Sign in', `
         var nw = canvas.clientWidth, nh = canvas.clientHeight;
         camera.aspect = nw / nh; camera.updateProjectionMatrix();
         renderer.setSize(nw, nh, false);
+        mat.uniforms.uScale.value = nh * 0.5;
       });
       document.addEventListener('visibilitychange', function(){
         running = !document.hidden;
