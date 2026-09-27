@@ -995,31 +995,25 @@ app.get('/', requireAuth, async (req, res) => {
             showBullets: false, showProgress: true,
             exitOnOverlayClick: true, exitOnEsc: true,
             scrollToElement: true, scrollTo: 'tooltip',
-            disableInteraction: true,
+            disableInteraction: false,
             positionPrecedence: ['top','bottom','right','left']
           });
           t.onbeforechange(function(target){
             // Floating steps centre against the viewport, so start from the top.
             if (!target || target === document.body) window.scrollTo(0, 0);
           });
-          // Failsafe: if a tooltip still lands off-screen, bring it into view.
+          // If a tooltip lands off-screen, scroll the page — never reposition the
+          // tooltip itself, which breaks intro.js's own click handling.
           t.onafterchange(function(){
             setTimeout(function(){
               var tip = document.querySelector('.introjs-tooltip');
               if (!tip) return;
+              tip.style.position = ''; tip.style.top = ''; tip.style.left = ''; tip.style.margin = '';
               var r = tip.getBoundingClientRect();
               var vh = window.innerHeight;
-              if (r.bottom > vh - 8 || r.top < 8) {
-                window.scrollBy({ top: r.top - Math.max(12, (vh - r.height) / 2), behavior: 'auto' });
-                var r2 = tip.getBoundingClientRect();
-                if (r2.bottom > vh - 8 || r2.top < 8) {
-                  tip.style.position = 'fixed';
-                  tip.style.top = Math.max(12, (vh - r2.height) / 2) + 'px';
-                  tip.style.left = Math.max(12, (window.innerWidth - r2.width) / 2) + 'px';
-                  tip.style.margin = '0';
-                }
-              }
-            }, 60);
+              if (r.bottom > vh - 8) window.scrollBy(0, (r.bottom - vh) + 24);
+              else if (r.top < 8)    window.scrollBy(0, r.top - 24);
+            }, 80);
           });
           t.oncomplete(done); t.onexit(done);
           t.start();
