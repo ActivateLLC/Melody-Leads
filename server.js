@@ -445,14 +445,17 @@ footer.credit b{font-weight:600;color:var(--mid)}
 .signin-wrap{position:relative;min-height:100vh;display:flex;align-items:center;
   justify-content:center;padding:24px;overflow:hidden;background:#2A2440}
 .signin-photo{position:absolute;inset:0;background-image:url('https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/6aa8b14c4402034b6c3745df_melody-vachal-speaking.jpg');
-  background-size:cover;background-position:52% 18%;filter:saturate(.85)}
+  background-size:cover;background-position:56% 6%;filter:saturate(.95) contrast(1.03)}
 .signin-veil{position:absolute;inset:0;
-  background:linear-gradient(165deg, rgba(42,36,64,.82) 0%, rgba(92,86,149,.78) 46%,
-                                     rgba(26,22,40,.9) 100%)}
+  background:linear-gradient(170deg,
+      rgba(42,36,64,.46) 0%,
+      rgba(58,50,92,.42) 26%,
+      rgba(70,63,120,.72) 52%,
+      rgba(26,22,40,.94) 100%)}
 #signin-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;
   pointer-events:none;opacity:0;transition:opacity 1.2s ease}
 #signin-canvas.on{opacity:.55}
-.signin{position:relative;z-index:2;width:100%;max-width:400px}
+.signin{position:relative;z-index:2;width:100%;max-width:400px;margin-top:9vh}
 .signin .mark{display:flex;align-items:center;gap:12px;margin-bottom:24px}
 .signin-logo{width:54px;height:54px;object-fit:contain;flex:none;display:block;
   background:rgba(255,255,255,.94);border-radius:14px;padding:6px}
