@@ -367,6 +367,12 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
               color:#fff;font-weight:600}
 .err{color:#9A5A48;font-size:.84rem;margin-bottom:9px}
 
+.quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.quick form{margin:0}
+.quick button{border:1px solid var(--line);background:var(--paper);color:var(--mid);
+  border-radius:999px;padding:6px 12px;font-size:.76rem;font-family:inherit;cursor:pointer}
+.quick button:active{background:var(--lav-soft);border-color:var(--lav)}
+.quick button.muted{color:var(--soft)}
 .lead{transition:border-color .12s ease,background .12s ease}
 .lead:active{background:#FCFAF7}
 .btn,.tab,.search button,.bulkbar button{transition:filter .12s ease}
@@ -508,6 +514,16 @@ app.get('/', requireAuth, async (req, res) => {
         <p class="who"><a href="/lead/${l.id}">${esc(l.name || l.email || 'No name')}</a></p>
         <div class="meta">${esc(l.organization || '')}${l.email ? ' &middot; ' + esc(l.email) : ''}</div>
         ${l.message ? `<div class="snip">${esc(String(l.message).slice(0, 160))}</div>` : ''}
+        ${l.is_spam ? '' : `<div class="quick">
+          <form method="post" action="/lead/${l.id}/snooze"><input type="hidden" name="days" value="1">
+            <input type="hidden" name="back" value="${esc(view)}"><button type="submit">Tomorrow</button></form>
+          <form method="post" action="/lead/${l.id}/snooze"><input type="hidden" name="days" value="7">
+            <input type="hidden" name="back" value="${esc(view)}"><button type="submit">Next week</button></form>
+          <form method="post" action="/lead/${l.id}/quick"><input type="hidden" name="to" value="contacted">
+            <input type="hidden" name="back" value="${esc(view)}"><button type="submit">Contacted</button></form>
+          <form method="post" action="/lead/${l.id}/quick"><input type="hidden" name="to" value="spam">
+            <input type="hidden" name="back" value="${esc(view)}"><button type="submit" class="muted">Spam</button></form>
+        </div>`}
       </div></div>`;
   }).join('') : `<div class="empty">Nothing here.</div>`;
 
@@ -764,6 +780,34 @@ async function nudgeSweep() {
 }
 setInterval(nudgeSweep, 6 * 60 * 60 * 1000);
 setTimeout(nudgeSweep, 60 * 1000);
+
+app.post('/lead/:id/snooze', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const days = Math.min(90, Math.max(1, parseInt(req.body.days, 10) || 1));
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+  await pool.query(
+    `UPDATE leads SET next_follow_up = CURRENT_DATE + $1::int, updated_at = now() WHERE id = $2`,
+    [days, id]);
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'snooze',$2)`,
+    [id, 'follow up in ' + days + ' day' + (days === 1 ? '' : 's')]);
+  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
+});
+
+app.post('/lead/:id/quick', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const to = req.body.to;
+  if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
+  if (to === 'spam') {
+    await pool.query(`UPDATE leads SET is_spam=true, status='spam',
+      spam_reason='marked by hand', updated_at=now() WHERE id=$1`, [id]);
+  } else {
+    await pool.query(`UPDATE leads SET status=$1, is_spam=false,
+      last_contacted=CASE WHEN $1='contacted' THEN now() ELSE last_contacted END,
+      updated_at=now() WHERE id=$2`, [to, id]);
+  }
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'quick',$2)`, [id, to]);
+  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
+});
 
 app.get('/export', requireAuth, async (req, res) => {
   const view = (req.query.view || 'all').toLowerCase();
