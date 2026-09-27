@@ -483,6 +483,7 @@ footer.credit b{font-weight:600;color:var(--mid)}
 
 const layout = (title, body) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237670B3'/%3E%3Cpath d='M9 22V10l7 7 7-7v12' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>${esc(title)}</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/introjs.min.css">
 <style>${CSS}</style></head><body>${body}
@@ -787,6 +788,10 @@ app.get('/', requireAuth, async (req, res) => {
             scrollToElement: true, scrollTo: 'tooltip',
             disableInteraction: true,
             positionPrecedence: ['bottom','top','right','left']
+          });
+          t.onbeforechange(function(target){
+            // Floating steps centre against the viewport, so start from the top.
+            if (!target || target === document.body) window.scrollTo(0, 0);
           });
           t.oncomplete(done); t.onexit(done);
           t.start();
