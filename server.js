@@ -765,10 +765,20 @@ app.get('/', requireAuth, async (req, res) => {
           intro: 'Tick a few and act on all of them together.',
           position: 'bottom'
         });
-        s.push({
-          title: 'That is it',
-          intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself. Bring this back any time from Show me around.'
-        });
+        var replay = el('tour-start');
+        if (replay) {
+          s.push({
+            element: replay,
+            title: 'That is it',
+            intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself. Tap Show me around to see this again.',
+            position: 'bottom'
+          });
+        } else {
+          s.push({
+            title: 'That is it',
+            intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself.'
+          });
+        }
         return s;
       }
       function done(){
