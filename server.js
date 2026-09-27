@@ -1543,6 +1543,54 @@ app.post('/lead/:id/undo', requireAuth, async (req, res) => {
   res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
 });
 
+// Bulk import of historical Webflow submissions. Deterministic triage only:
+// no model calls, so importing thousands of rows stays fast and cheap.
+function looksMachineGenerated(name) {
+  if (!name) return false;
+  const n = String(name).trim();
+  if (n.indexOf(' ') !== -1) return false;              // real names usually have a space
+  if (!/^[A-Za-z0-9]{8,14}$/.test(n)) return false;     // fixed-length alphanumeric handle
+  const hasUpper = /[A-Z]/.test(n), hasLower = /[a-z]/.test(n), hasDigit = /[0-9]/.test(n);
+  return (hasUpper && hasLower) || hasDigit;            // mixed case or digits mid-word
+}
+
+app.post('/import', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  const items = Array.isArray(req.body && req.body.items) ? req.body.items : [];
+  let added = 0, skipped = 0, flagged = 0;
+
+  for (const it of items) {
+    const f = it.fields || {};
+    const formName = it.form || 'unknown';
+    const name  = pick(f, ['name','full name','your name','first name']);
+    const email = pick(f, ['email','email address','e-mail']);
+    const message = pick(f, ['message','write about your project','event details','comments','notes']);
+
+    // Same submission twice is the same row.
+    const dupe = await pool.query(
+      `SELECT 1 FROM leads WHERE raw->>'importId' = $1 LIMIT 1`, [String(it.id || '')]);
+    if (dupe.rows.length) { skipped++; continue; }
+
+    const t = triage(f, message);
+    const machine = looksMachineGenerated(name);
+    const spam = t.spam || machine;
+    const reason = t.reason || (machine ? 'machine-generated name' : null);
+    if (spam) flagged++;
+
+    await pool.query(
+      `INSERT INTO leads (received_at,form_name,page_url,name,email,phone,organization,message,
+                          raw,is_spam,spam_reason,status,tag)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [it.at || new Date().toISOString(), formName, it.page || null, name, email,
+       pick(f, ['phone','phone number','telephone']),
+       pick(f, ['organization','organisation','company']), message,
+       JSON.stringify({ importId: it.id, source: 'webflow', fields: f }),
+       spam, reason, spam ? 'spam' : 'new', inferTag(formName, message)]);
+    added++;
+  }
+  res.json({ ok: true, added, skipped, flagged });
+});
+
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
 
 init().then(() => app.listen(PORT, () => console.log('listening on ' + PORT)))
