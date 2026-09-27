@@ -413,6 +413,11 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
 .timeline .when{font-size:.72rem;color:var(--soft)}
 .timeline .what{font-size:.89rem;color:var(--mid);white-space:pre-wrap}
 /* Guided tour */
+body.tour-on header{position:static !important}
+.introjs-tooltipReferenceLayer,.introjs-tooltip{z-index:2000000 !important}
+.introjs-helperLayer{z-index:1999998 !important}
+.introjs-overlay{z-index:1999997 !important}
+.introjs-tooltipbuttons{padding:8px 14px 14px !important}
 .introjs-tooltip{border-radius:14px !important;font-family:inherit !important;
   max-width:330px !important;box-shadow:0 24px 48px -26px rgba(36,31,43,.5) !important}
 .introjs-tooltiptext{font-size:1rem !important;line-height:1.55 !important;color:var(--mid) !important;
@@ -725,50 +730,75 @@ app.get('/', requireAuth, async (req, res) => {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
     <script>
     (function(){
+      function el(id){ return document.getElementById(id); }
       function steps(){
         var s = [{
           title: 'Welcome',
           intro: 'This is everything that came in through your website. Spam is filed separately, so what you see here is worth reading.'
-        }, {
-          element: document.getElementById('tour-summary'),
-          title: 'Start here',
-          intro: 'A short summary of what is waiting, and the three numbers that matter: what is due, what is new, and what you have booked.'
-        }, {
-          element: document.getElementById('tour-tabs'),
-          title: 'Moving around',
-          intro: 'Due shows anything you said you would come back to. The others sort by where each enquiry has got to, or what it is about.'
         }];
-        var row = document.getElementById('tour-row');
+        var stats = document.querySelector('.stats') || el('tour-summary');
+        if (stats) s.push({
+          element: stats,
+          title: 'Start here',
+          intro: 'What is waiting: due, new, and booked.',
+          position: 'bottom'
+        });
+        var tabs = el('tour-tabs');
+        if (tabs) s.push({
+          element: tabs,
+          title: 'Moving around',
+          intro: 'Due shows anything you said you would come back to. The others sort by where an enquiry has got to.',
+          position: 'bottom'
+        });
+        var row = el('tour-row');
         if (row) s.push({
           element: row,
           title: 'One enquiry',
-          intro: 'Tap the name to read the whole message and see a reply already drafted for you. Or use the buttons to put it off until tomorrow, next week, or mark that you have replied.'
+          intro: 'Tap the name to read it and see a reply already drafted. Or put it off until tomorrow or next week.',
+          position: 'top'
         });
-        var bulk = document.getElementById('tour-bulk');
+        var bulk = el('tour-bulk');
         if (bulk) s.push({
           element: bulk,
           title: 'Several at once',
-          intro: 'Tick a few and act on all of them together. Useful when several arrive at the same time.'
+          intro: 'Tick a few and act on all of them together.',
+          position: 'bottom'
         });
         s.push({
           title: 'That is it',
-          intro: 'Nothing here sends an email on its own. Replies are drafted for you, and you send them yourself. You can bring this tour back any time from Show me around.'
+          intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself. Bring this back any time from Show me around.'
         });
         return s;
       }
-      function run(){
-        introJs().setOptions({
-          steps: steps(),
-          nextLabel: 'Next', prevLabel: 'Back', doneLabel: 'Got it',
-          showBullets: false, showProgress: true, exitOnOverlayClick: false,
-          scrollToElement: true
-        }).oncomplete(seen).onexit(seen).start();
+      function done(){
+        document.body.classList.remove('tour-on');
+        try { localStorage.setItem('mv_tour_seen','1'); } catch(e){}
       }
-      function seen(){ try { localStorage.setItem('mv_tour_seen','1'); } catch(e){} }
-      var btn = document.getElementById('tour-start');
-      if (btn) btn.addEventListener('click', run);
+      function run(){
+        if (typeof introJs !== 'function') return;
+        document.body.classList.add('tour-on');
+        window.scrollTo(0, 0);
+        try {
+          var t = introJs().setOptions({
+            steps: steps(),
+            nextLabel: 'Next', prevLabel: 'Back', doneLabel: 'Got it',
+            showBullets: false, showProgress: true,
+            exitOnOverlayClick: true, exitOnEsc: true,
+            scrollToElement: true, scrollTo: 'tooltip',
+            disableInteraction: true,
+            positionPrecedence: ['bottom','top','right','left']
+          });
+          t.oncomplete(done); t.onexit(done);
+          t.start();
+        } catch (e) { done(); }
+      }
+      var btn = el('tour-start');
+      if (btn) btn.addEventListener('click', function(){
+        try { localStorage.removeItem('mv_tour_seen'); } catch(e){}
+        run();
+      });
       try {
-        if (!localStorage.getItem('mv_tour_seen')) setTimeout(run, 700);
+        if (!localStorage.getItem('mv_tour_seen')) setTimeout(run, 800);
       } catch(e){}
     })();
     </script>`));
