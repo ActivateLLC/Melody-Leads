@@ -228,6 +228,28 @@ textarea{width:100%;min-height:70px;resize:vertical}
 .login button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--purple);
               color:#fff;font-weight:600}
 .err{color:#9a3d3d;font-size:.84rem;margin-bottom:9px}
+
+/* Summary header */
+.summary{background:linear-gradient(160deg,#5C5695,#7670B3);color:#fff;border-radius:14px;
+         padding:18px 18px 16px;margin-bottom:14px}
+.summary .hello{font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;
+                color:#C9BFEA;margin-bottom:10px}
+.summary .line{font-size:1.32rem;font-weight:600;line-height:1.3;margin:0}
+.summary .sub{font-size:.85rem;color:rgba(255,255,255,.78);margin-top:6px}
+.stats{display:flex;gap:18px;margin-top:14px;padding-top:13px;
+       border-top:1px solid rgba(255,255,255,.22)}
+.stat{flex:1}
+.stat b{display:block;font-size:1.5rem;font-weight:700;line-height:1.1;
+        font-variant-numeric:tabular-nums}
+.stat span{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+           color:rgba(255,255,255,.72)}
+
+/* Interaction feedback — instant, no entrance delay */
+.lead{transition:border-color .12s ease,background .12s ease}
+.lead:active{background:#FBFAFE}
+.btn,.tab,.search button,.bulkbar button{transition:filter .12s ease}
+.btn:active,.search button:active,.bulkbar button:active{filter:brightness(.92)}
+@media (prefers-reduced-motion: reduce){*{transition:none !important}}
 `;
 
 const layout = (title, body) => `<!doctype html><html lang="en"><head>
@@ -319,6 +341,20 @@ app.get('/', requireAuth, async (req, res) => {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const due = Number(n.c_due), fresh = Number(n.c_new);
+  const headline = due > 0
+    ? (due === 1 ? 'One follow-up is due.' : due + ' follow-ups are due.')
+    : fresh > 0
+      ? (fresh === 1 ? 'One new enquiry to read.' : fresh + ' new enquiries to read.')
+      : 'You are all caught up.';
+  const subline = due > 0
+    ? 'Oldest first, so the ones waiting longest come up top.'
+    : fresh > 0
+      ? 'Nothing overdue — these came in since you last looked.'
+      : 'Nothing due and nothing new. Spam has been filed on its own.';
+
   const items = rows.length ? rows.map(l => {
     const overdue = l.next_follow_up &&
       new Date(l.next_follow_up).toISOString().slice(0, 10) <= today &&
@@ -343,6 +379,16 @@ app.get('/', requireAuth, async (req, res) => {
   res.send(layout('Leads', `
     <header><h1>Melody &mdash; leads</h1><a href="/logout">Sign out</a></header>
     <div class="wrap">
+      <div class="summary">
+        <div class="hello">${esc(greeting)}</div>
+        <p class="line">${esc(headline)}</p>
+        <div class="sub">${esc(subline)}</div>
+        <div class="stats">
+          <div class="stat"><b data-to="${n.c_due}">0</b><span>Due</span></div>
+          <div class="stat"><b data-to="${n.c_new}">0</b><span>New</span></div>
+          <div class="stat"><b data-to="${n.c_booked}">0</b><span>Booked</span></div>
+        </div>
+      </div>
       <div class="tabs">${tabs}</div>
       <form class="search" method="get" action="/">
         <input type="hidden" name="view" value="${esc(view)}">
@@ -365,7 +411,24 @@ app.get('/', requireAuth, async (req, res) => {
       </form>
       <p class="count">${rows.length} shown</p>
       ${items}
-    </div>`));
+    </div>
+    <script>
+    (function(){
+      var reduce = window.matchMedia &&
+                   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      document.querySelectorAll('.stat b').forEach(function(el){
+        var to = parseInt(el.getAttribute('data-to'), 10) || 0;
+        if (reduce || to === 0) { el.textContent = to; return; }
+        var start = performance.now(), ms = 420;
+        function step(now){
+          var p = Math.min((now - start) / ms, 1);
+          el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3)));
+          if (p < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+      });
+    })();
+    </script>`));
 });
 
 /* --------------------------------------------------------------- detail */
