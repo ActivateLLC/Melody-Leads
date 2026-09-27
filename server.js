@@ -396,6 +396,9 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px;
       margin-bottom:12px}
 .card h2{margin:0 0 4px;font-size:1.2rem;letter-spacing:-.01em}
+.nextstep{margin:12px 0 4px;padding:12px 14px;border-radius:11px;
+  background:var(--lav-soft);border:1px solid #DDD7EE;color:var(--deep);
+  font-size:.96rem;line-height:1.5;font-weight:500}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .btn{padding:14px 20px;border:0;border-radius:10px;background:var(--deep);color:#fff;
      font-weight:600;font-size:.95rem;text-decoration:none;display:inline-flex;
@@ -414,67 +417,8 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
 .timeline li::before{content:"";position:absolute;left:-5px;top:5px;width:8px;height:8px;
      border-radius:50%;background:var(--lav)}
 .timeline .when{font-size:.72rem;color:var(--soft)}
-.timeline .what{font-size:.89rem;color:var(--mid);white-space:pre-wrap}
-/* Guided tour */
-body.tour-on header{position:static !important}
-.introjs-tooltipReferenceLayer,.introjs-tooltip{z-index:2000000 !important}
-.introjs-helperLayer{z-index:1999998 !important}
-.introjs-overlay{z-index:1999997 !important}
-
-.introjs-tooltip{border-radius:16px !important;font-family:inherit !important;
-  max-width:min(334px, calc(100vw - 28px)) !important;background:var(--card) !important;
-  box-shadow:0 28px 56px -28px rgba(36,31,43,.62) !important;border:0 !important}
-.introjs-tooltip-title{font-size:1.12rem !important;font-weight:700 !important;
-  color:var(--ink) !important;letter-spacing:-.01em !important;line-height:1.3 !important}
-.introjs-tooltipheader{padding:18px 18px 0 !important}
-.introjs-tooltiptext{font-size:1rem !important;line-height:1.55 !important;
-  color:var(--mid) !important;padding:8px 18px 4px !important}
-
-/* Progress: her purple, not stock blue */
-.introjs-progress{background:var(--lav-soft) !important;height:4px !important;
-  border-radius:99px !important;margin:12px 18px 0 !important;box-shadow:none !important}
-.introjs-progressbar{background:var(--purple) !important;border-radius:99px !important}
-
-/* Buttons: no browser focus ring, no stock gradients */
-.introjs-tooltipbuttons{padding:12px 16px 16px !important;border-top:0 !important}
-.introjs-button{border-radius:10px !important;font-family:inherit !important;
-  font-size:.92rem !important;font-weight:600 !important;padding:11px 18px !important;
-  text-shadow:none !important;background-image:none !important;
-  box-shadow:none !important;outline:0 !important;transition:filter .12s ease !important}
-.introjs-button:focus,.introjs-button:active,.introjs-button:hover{
-  box-shadow:none !important;outline:0 !important}
-.introjs-nextbutton,.introjs-donebutton{background:var(--deep) !important;color:#fff !important;
-  border:1px solid var(--deep) !important}
-.introjs-nextbutton:active,.introjs-donebutton:active{filter:brightness(.92) !important}
-.introjs-prevbutton{background:var(--card) !important;color:var(--mid) !important;
-  border:1px solid var(--line) !important}
-.introjs-disabled{opacity:.42 !important;color:var(--soft) !important}
-
-/* Close control */
-.introjs-skipbutton{color:var(--soft) !important;font-size:1.25rem !important;
-  font-weight:400 !important;padding:14px 16px !important;line-height:1 !important;
-  background:none !important;border:0 !important}
-.introjs-skipbutton:hover{color:var(--ink) !important}
-
-.introjs-helperLayer{border-radius:14px !important;
-  box-shadow:0 0 0 2px var(--purple), 0 0 0 5000px rgba(24,20,34,.62) !important}
-.introjs-arrow.top,.introjs-arrow.bottom{border-color:transparent !important}
-.introjs-arrow.top{border-bottom-color:var(--card) !important}
-.introjs-arrow.bottom{border-top-color:var(--card) !important}
-.introjs-arrow.left{border-right-color:var(--card) !important}
-.introjs-arrow.right{border-left-color:var(--card) !important}
-
-.tour-link{background:none;border:0;color:#fff;opacity:.9;font-size:.8rem;font-family:inherit;
-  text-decoration:underline;cursor:pointer;padding:0}
-
-/* Floating steps: centre with a transform. intro.js uses a negative margin sized
-   from its own width, which our max-width override invalidates. */
-.introjs-tooltip.introjs-floating{
-  left:50% !important;
-  margin-left:0 !important; margin-right:0 !important;
-  transform:translateX(-50%) !important;
-  width:min(334px, calc(100vw - 28px)) !important}
-
+.timeline .what{font-size:.92rem;color:var(--mid);white-space:pre-wrap}
+.ev-icon{display:inline-block;width:1.3em;color:var(--purple);font-weight:600}
 .brief{margin-top:14px;padding:13px 14px;border-radius:11px;max-height:9.5em;overflow:auto;
   -webkit-overflow-scrolling:touch;
   background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
@@ -542,7 +486,6 @@ const layout = (title, body) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237670B3'/%3E%3Cpath d='M9 22V10l7 7 7-7v12' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>${esc(title)}</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/introjs.min.css">
 <style>${CSS}</style></head><body>${body}
 <footer class="credit">Custom CRM by <b>Activate</b></footer>
 </body></html>`;
@@ -845,16 +788,13 @@ app.get('/', requireAuth, async (req, res) => {
       ? 'Nothing overdue — these came in since you last looked.'
       : 'Nothing due and nothing new. Spam has been filed on its own.';
 
-  let firstRow = true;
   const items = rows.length ? rows.map(l => {
     const overdue = l.next_follow_up &&
       new Date(l.next_follow_up).toISOString().slice(0, 10) <= today &&
       !['booked', 'cold'].includes(l.status);
     const when = new Date(l.received_at).toLocaleDateString('en-US',
       { month: 'short', day: 'numeric' });
-    const rowId = firstRow ? ' id="tour-row"' : '';
-    firstRow = false;
-    return `<div class="lead ${l.is_spam ? 'spam' : ''} ${overdue ? 'overdue' : ''}"${rowId}>
+    return `<div class="lead ${l.is_spam ? 'spam' : ''} ${overdue ? 'overdue' : ''}">
       <input type="checkbox" name="ids" value="${l.id}" form="bulk">
       <div class="body">
         <div class="meta">
@@ -882,10 +822,9 @@ app.get('/', requireAuth, async (req, res) => {
 
   res.send(layout('Leads', `
     <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="">Melody &mdash; leads</h1>
-      <span><button class="tour-link" id="tour-start" type="button">Show me around</button>
-      &nbsp;&nbsp;<a href="/logout">Sign out</a></span></header>
+      <a href="/logout">Sign out</a></header>
     <div class="wrap">
-      <div class="summary" id="tour-summary">
+      <div class="summary">
         <div class="hello">${esc(greeting)}</div>
         <p class="line">${esc(headline)}</p>
         <div class="sub">${esc(subline)}</div>
@@ -896,7 +835,7 @@ app.get('/', requireAuth, async (req, res) => {
           <div class="stat"><b data-to="${n.c_booked}">0</b><span>Booked</span></div>
         </div>
       </div>
-      <div class="tabs" id="tour-tabs">${tabs}</div>
+      <div class="tabs">${tabs}</div>
       <form class="search" method="get" action="/">
         <input type="hidden" name="view" value="${esc(view)}">
         <input name="q" value="${esc(q)}" placeholder="Search name, email, organisation, message">
@@ -904,7 +843,7 @@ app.get('/', requireAuth, async (req, res) => {
       </form>
       <form id="bulk" method="post" action="/bulk">
         <input type="hidden" name="back" value="${esc(view)}">
-        <div class="bulkbar" id="tour-bulk">
+        <div class="bulkbar">
           <label><input type="checkbox" onclick="document.querySelectorAll('input[name=ids]').forEach(function(c){c.checked=event.target.checked})"> All</label>
           <select name="action">
             <option value="spam">Mark as spam</option>
@@ -941,103 +880,7 @@ app.get('/', requireAuth, async (req, res) => {
       });
     })();
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
-    <script>
-    (function(){
-      function el(id){ return document.getElementById(id); }
-      function steps(){
-        var s = [{
-          title: 'Welcome',
-          intro: 'This is everything that came in through your website. Spam is filed separately, so what you see here is worth reading.'
-        }];
-        var stats = document.querySelector('.stats') || el('tour-summary');
-        if (stats) s.push({
-          element: stats,
-          title: 'Start here',
-          intro: 'What is waiting: due, new, and booked.'
-        });
-        var tabs = el('tour-tabs');
-        if (tabs) s.push({
-          element: tabs,
-          title: 'Moving around',
-          intro: 'Due shows anything you said you would come back to. The others sort by where an enquiry has got to.'
-        });
-        var row = el('tour-row');
-        if (row) s.push({
-          element: row,
-          title: 'One enquiry',
-          intro: 'Tap the name to read it and see a reply already drafted. Or put it off until tomorrow or next week.'
-        });
-        var bulk = el('tour-bulk');
-        if (bulk) s.push({
-          element: bulk,
-          title: 'Several at once',
-          intro: 'Tick a few and act on all of them together.'
-        });
-        var replay = el('tour-start');
-        if (replay) {
-          s.push({
-            element: replay,
-            title: 'That is it',
-            intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself. Tap Show me around to see this again.'
-          });
-        } else {
-          s.push({
-            title: 'That is it',
-            intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself.'
-          });
-        }
-        return s;
-      }
-      function done(){
-        document.body.classList.remove('tour-on');
-        try { localStorage.setItem('mv_tour_seen','1'); } catch(e){}
-      }
-      function run(){
-        if (typeof introJs !== 'function') return;
-        document.body.classList.add('tour-on');
-        window.scrollTo(0, 0);
-        try {
-          var t = introJs().setOptions({
-            steps: steps(),
-            nextLabel: 'Next', prevLabel: 'Back', doneLabel: 'Got it',
-            showBullets: false, showProgress: true,
-            exitOnOverlayClick: true, exitOnEsc: true,
-            scrollToElement: true, scrollTo: 'tooltip',
-            disableInteraction: false,
-            positionPrecedence: ['top','bottom','right','left']
-          });
-          t.onbeforechange(function(target){
-            // Floating steps centre against the viewport, so start from the top.
-            if (!target || target === document.body) window.scrollTo(0, 0);
-          });
-          // If a tooltip lands off-screen, scroll the page — never reposition the
-          // tooltip itself, which breaks intro.js's own click handling.
-          t.onafterchange(function(){
-            setTimeout(function(){
-              var tip = document.querySelector('.introjs-tooltip');
-              if (!tip) return;
-              tip.style.position = ''; tip.style.top = ''; tip.style.left = ''; tip.style.margin = '';
-              var r = tip.getBoundingClientRect();
-              var vh = window.innerHeight;
-              if (r.bottom > vh - 8) window.scrollBy(0, (r.bottom - vh) + 24);
-              else if (r.top < 8)    window.scrollBy(0, r.top - 24);
-            }, 80);
-          });
-          t.oncomplete(done); t.onexit(done);
-          t.start();
-        } catch (e) { done(); }
-      }
-      var btn = el('tour-start');
-      if (btn) btn.addEventListener('click', function(){
-        try { localStorage.removeItem('mv_tour_seen'); } catch(e){}
-        run();
-      });
-      try {
-        if (!localStorage.getItem('mv_tour_seen')) setTimeout(run, 800);
-      } catch(e){}
-    })();
-    </script>`));
+`));
 });
 
 /* --------------------------------------------------------------- detail */
@@ -1059,16 +902,64 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
         [l.email, id])
     : { rows: [] };
 
+  // One sentence telling her what this lead needs from her right now.
+  function nextStep(l) {
+    const days = l.last_contacted
+      ? Math.floor((Date.now() - new Date(l.last_contacted)) / 86400000) : null;
+    const due = l.next_follow_up
+      ? new Date(l.next_follow_up).toISOString().slice(0, 10) : null;
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (l.is_spam) return 'Filed as spam' + (l.spam_reason ? ' (' + l.spam_reason + ')' : '') +
+                           '. If that is wrong, change the status below.';
+    if (l.status === 'booked') return 'Booked. Nothing needed unless plans change.';
+    if (l.status === 'cold')   return 'Set aside. Change the status if it comes back to life.';
+    if (l.status === 'new') {
+      if (l.tag === 'speaking')
+        return 'A speaking enquiry waiting on a first reply' +
+               (l.event_date ? ' \u2014 they mentioned ' + l.event_date : '') + '.';
+      if (l.tag === 'guide') return 'Signed up for the guide. It was sent automatically \u2014 no reply needed unless you want to.';
+      return 'Waiting on a first reply from you.';
+    }
+    if (l.status === 'contacted') {
+      if (due && due <= today) return 'You said you would come back to this today.';
+      if (due) return 'You are due to follow up on ' + due + '.';
+      if (days !== null && days >= 5) return 'You replied ' + days + ' days ago with no answer. Worth a nudge.';
+      if (days !== null) return 'You replied ' + (days === 0 ? 'today' : days + ' days ago') + '. Give them a little time.';
+      return 'Marked contacted. Set a follow-up date so it does not go quiet.';
+    }
+    return 'Choose a status below so this does not get lost.';
+  }
+
   const statusOpts = STATUSES.map(s =>
     `<option value="${s}" ${s === l.status ? 'selected' : ''}>${s}</option>`).join('');
   const tagOpts = TAGS.map(t =>
     `<option value="${t}" ${t === l.tag ? 'selected' : ''}>${t}</option>`).join('');
 
-  const timeline = ev.rows.map(e => `<li>
+  // Each event says plainly what happened and, where it matters, what it means now.
+  function describe(e) {
+    var b = e.body || '';
+    switch (e.kind) {
+      case 'received':   return { icon: '\u2709', line: 'Enquiry arrived ' + b.replace(/^via /, 'through the ') };
+      case 'draft':      return { icon: '\u270E', line: 'A reply was drafted for you to review' };
+      case 'contacted':  return { icon: '\u2192', line: 'You marked this as contacted' };
+      case 'status':     return { icon: '\u21BB', line: 'Status changed: ' + b };
+      case 'note':       return { icon: '\u201C', line: b };
+      case 'snooze':     return { icon: '\u23F1', line: 'Put off \u2014 ' + b };
+      case 'quick':      return { icon: '\u2713', line: 'Marked ' + b + ' from the list' };
+      case 'bulk':       return { icon: '\u2713', line: 'Marked ' + b + ' along with others' };
+      case 'nudge':      return { icon: '\u26A0', line: 'No reply after five days, so it came back to your queue' };
+      default:           return { icon: '\u2022', line: (e.kind + (b ? ': ' + b : '')) };
+    }
+  }
+
+  const timeline = ev.rows.map(e => {
+    const d = describe(e);
+    return `<li>
       <div class="when">${new Date(e.at).toLocaleString('en-US',
-        { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-        &middot; ${esc(e.kind)}</div>
-      ${e.body ? `<div class="what">${esc(e.body)}</div>` : ''}</li>`).join('');
+        { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
+      <div class="what"><span class="ev-icon">${d.icon}</span>${esc(d.line)}</div></li>`;
+  }).join('');
 
   res.send(layout(l.name || 'Lead', `
     <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt=""><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
@@ -1080,6 +971,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
         <div class="meta">Received ${new Date(l.received_at).toLocaleString('en-US',
           { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
           via ${esc(l.form_name || 'form')}</div>
+        <div class="nextstep">${esc(nextStep(l))}</div>
         ${l.intent ? `<div class="meta" style="margin-top:6px"><span class="pill">${esc(l.urgency || 'normal')}</span> ${esc(l.intent)}</div>` : ''}
         ${(l.event_date || l.audience) ? `<div class="meta">${l.event_date ? 'Date mentioned: ' + esc(l.event_date) : ''}${(l.event_date && l.audience) ? ' &middot; ' : ''}${l.audience ? 'Audience: ' + esc(l.audience) : ''}</div>` : ''}
         ${l.message ? `<div class="msg">${esc(l.message)}</div>` : ''}
