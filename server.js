@@ -466,7 +466,8 @@ body.tour-on header{position:static !important}
 
 .tour-link{background:none;border:0;color:#fff;opacity:.9;font-size:.8rem;font-family:inherit;
   text-decoration:underline;cursor:pointer;padding:0}
-.brief{margin-top:14px;padding:13px 14px;border-radius:11px;
+.brief{margin-top:14px;padding:13px 14px;border-radius:11px;max-height:9.5em;overflow:auto;
+  -webkit-overflow-scrolling:touch;
   background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
   font-size:.95rem;line-height:1.55;color:rgba(255,255,255,.94)}
 .brief::before{content:"Today";display:block;font-size:.66rem;letter-spacing:.2em;
@@ -944,37 +945,32 @@ app.get('/', requireAuth, async (req, res) => {
         if (stats) s.push({
           element: stats,
           title: 'Start here',
-          intro: 'What is waiting: due, new, and booked.',
-          position: 'bottom'
+          intro: 'What is waiting: due, new, and booked.'
         });
         var tabs = el('tour-tabs');
         if (tabs) s.push({
           element: tabs,
           title: 'Moving around',
-          intro: 'Due shows anything you said you would come back to. The others sort by where an enquiry has got to.',
-          position: 'bottom'
+          intro: 'Due shows anything you said you would come back to. The others sort by where an enquiry has got to.'
         });
         var row = el('tour-row');
         if (row) s.push({
           element: row,
           title: 'One enquiry',
-          intro: 'Tap the name to read it and see a reply already drafted. Or put it off until tomorrow or next week.',
-          position: 'top'
+          intro: 'Tap the name to read it and see a reply already drafted. Or put it off until tomorrow or next week.'
         });
         var bulk = el('tour-bulk');
         if (bulk) s.push({
           element: bulk,
           title: 'Several at once',
-          intro: 'Tick a few and act on all of them together.',
-          position: 'bottom'
+          intro: 'Tick a few and act on all of them together.'
         });
         var replay = el('tour-start');
         if (replay) {
           s.push({
             element: replay,
             title: 'That is it',
-            intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself. Tap Show me around to see this again.',
-            position: 'bottom'
+            intro: 'Nothing here sends an email on its own. Replies are drafted for you and you send them yourself. Tap Show me around to see this again.'
           });
         } else {
           s.push({
@@ -1000,11 +996,30 @@ app.get('/', requireAuth, async (req, res) => {
             exitOnOverlayClick: true, exitOnEsc: true,
             scrollToElement: true, scrollTo: 'tooltip',
             disableInteraction: true,
-            positionPrecedence: ['bottom','top','right','left']
+            positionPrecedence: ['top','bottom','right','left']
           });
           t.onbeforechange(function(target){
             // Floating steps centre against the viewport, so start from the top.
             if (!target || target === document.body) window.scrollTo(0, 0);
+          });
+          // Failsafe: if a tooltip still lands off-screen, bring it into view.
+          t.onafterchange(function(){
+            setTimeout(function(){
+              var tip = document.querySelector('.introjs-tooltip');
+              if (!tip) return;
+              var r = tip.getBoundingClientRect();
+              var vh = window.innerHeight;
+              if (r.bottom > vh - 8 || r.top < 8) {
+                window.scrollBy({ top: r.top - Math.max(12, (vh - r.height) / 2), behavior: 'auto' });
+                var r2 = tip.getBoundingClientRect();
+                if (r2.bottom > vh - 8 || r2.top < 8) {
+                  tip.style.position = 'fixed';
+                  tip.style.top = Math.max(12, (vh - r2.height) / 2) + 'px';
+                  tip.style.left = Math.max(12, (window.innerWidth - r2.width) / 2) + 'px';
+                  tip.style.margin = '0';
+                }
+              }
+            }, 60);
           });
           t.oncomplete(done); t.onexit(done);
           t.start();
