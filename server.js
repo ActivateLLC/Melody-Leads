@@ -475,8 +475,6 @@ body.tour-on header{position:static !important}
   transform:translateX(-50%) !important;
   width:min(334px, calc(100vw - 28px)) !important}
 
-/* Never let an anchored tooltip hang off either edge. */
-.introjs-tooltipReferenceLayer{max-width:100vw !important}
 .brief{margin-top:14px;padding:13px 14px;border-radius:11px;max-height:9.5em;overflow:auto;
   -webkit-overflow-scrolling:touch;
   background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
