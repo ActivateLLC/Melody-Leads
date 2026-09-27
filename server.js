@@ -331,7 +331,10 @@ body{margin:0;background:var(--paper);color:var(--ink);
 a{color:var(--deep)}
 header{background:var(--purple);color:#fff;padding:14px 18px;position:sticky;top:0;z-index:20;
        display:flex;justify-content:space-between;align-items:center;gap:10px}
-header h1{margin:0;font-size:1rem;font-weight:600;letter-spacing:.01em}
+header h1{margin:0;font-size:1rem;font-weight:600;letter-spacing:.01em;
+  display:flex;align-items:center;gap:9px}
+.hdr-logo{height:30px;width:auto;display:block;flex:none;
+  background:#fff;border-radius:8px;padding:3px 4px}
 header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .wrap{max-width:900px;margin:0 auto;padding:16px 14px 80px}
 
@@ -445,9 +448,7 @@ footer.credit b{font-weight:600;color:var(--mid)}
     var(--paper);}
 .signin{width:100%;max-width:400px}
 .signin .mark{display:flex;align-items:center;gap:11px;margin-bottom:26px}
-.signin .dot{width:38px;height:38px;border-radius:11px;flex:none;
-  background:linear-gradient(150deg,#5C5695,#8A7FC0);
-  box-shadow:0 6px 16px -8px rgba(92,86,149,.7)}
+.signin-logo{width:52px;height:52px;object-fit:contain;flex:none;display:block}
 .signin .mark .name{font-weight:700;font-size:1.05rem;letter-spacing:-.01em;line-height:1.2}
 .signin .mark .role{font-size:.82rem;color:var(--soft);line-height:1.3}
 .signin .card{background:var(--card);border:1px solid var(--line);border-radius:18px;
@@ -495,7 +496,7 @@ const layout = (title, body) => `<!doctype html><html lang="en"><head>
 app.get('/login', (req, res) => res.send(layout('Sign in', `
   <div class="signin-wrap"><div class="signin">
     <div class="mark">
-      <div class="dot"></div>
+      <img class="signin-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="Melody Vachal">
       <div>
         <div class="name">Melody Vachal</div>
         <div class="role">Enquiries &amp; follow-ups</div>
@@ -668,7 +669,7 @@ app.get('/', requireAuth, async (req, res) => {
   }).join('') : `<div class="empty">Nothing here.</div>`;
 
   res.send(layout('Leads', `
-    <header><h1>Melody &mdash; leads</h1>
+    <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="">Melody &mdash; leads</h1>
       <span><button class="tour-link" id="tour-start" type="button">Show me around</button>
       &nbsp;&nbsp;<a href="/logout">Sign out</a></span></header>
     <div class="wrap">
@@ -850,7 +851,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       ${e.body ? `<div class="what">${esc(e.body)}</div>` : ''}</li>`).join('');
 
   res.send(layout(l.name || 'Lead', `
-    <header><h1><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
+    <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt=""><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
       <a href="/logout">Sign out</a></header>
     <div class="wrap">
       <div class="card">
