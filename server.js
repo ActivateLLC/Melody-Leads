@@ -420,18 +420,50 @@ body.tour-on header{position:static !important}
 .introjs-tooltipReferenceLayer,.introjs-tooltip{z-index:2000000 !important}
 .introjs-helperLayer{z-index:1999998 !important}
 .introjs-overlay{z-index:1999997 !important}
-.introjs-tooltipbuttons{padding:8px 14px 14px !important}
-.introjs-tooltip{border-radius:14px !important;font-family:inherit !important;
-  max-width:330px !important;box-shadow:0 24px 48px -26px rgba(36,31,43,.5) !important}
-.introjs-tooltiptext{font-size:1rem !important;line-height:1.55 !important;color:var(--mid) !important;
-  padding:18px 18px 8px !important}
-.introjs-tooltip-title{font-size:1.1rem !important;font-weight:700 !important;color:var(--ink) !important}
-.introjs-button{border-radius:9px !important;font-family:inherit !important;font-size:.9rem !important;
-  padding:10px 16px !important;text-shadow:none !important}
-.introjs-nextbutton{background:var(--deep) !important;color:#fff !important;border-color:var(--deep) !important}
-.introjs-prevbutton,.introjs-skipbutton{background:var(--card) !important;color:var(--mid) !important;
-  border-color:var(--line) !important}
-.introjs-helperLayer{border-radius:13px !important}
+
+.introjs-tooltip{border-radius:16px !important;font-family:inherit !important;
+  max-width:334px !important;background:var(--card) !important;
+  box-shadow:0 28px 56px -28px rgba(36,31,43,.62) !important;border:0 !important}
+.introjs-tooltip-title{font-size:1.12rem !important;font-weight:700 !important;
+  color:var(--ink) !important;letter-spacing:-.01em !important;line-height:1.3 !important}
+.introjs-tooltipheader{padding:18px 18px 0 !important}
+.introjs-tooltiptext{font-size:1rem !important;line-height:1.55 !important;
+  color:var(--mid) !important;padding:8px 18px 4px !important}
+
+/* Progress: her purple, not stock blue */
+.introjs-progress{background:var(--lav-soft) !important;height:4px !important;
+  border-radius:99px !important;margin:12px 18px 0 !important;box-shadow:none !important}
+.introjs-progressbar{background:var(--purple) !important;border-radius:99px !important}
+
+/* Buttons: no browser focus ring, no stock gradients */
+.introjs-tooltipbuttons{padding:12px 16px 16px !important;border-top:0 !important}
+.introjs-button{border-radius:10px !important;font-family:inherit !important;
+  font-size:.92rem !important;font-weight:600 !important;padding:11px 18px !important;
+  text-shadow:none !important;background-image:none !important;
+  box-shadow:none !important;outline:0 !important;transition:filter .12s ease !important}
+.introjs-button:focus,.introjs-button:active,.introjs-button:hover{
+  box-shadow:none !important;outline:0 !important}
+.introjs-nextbutton,.introjs-donebutton{background:var(--deep) !important;color:#fff !important;
+  border:1px solid var(--deep) !important}
+.introjs-nextbutton:active,.introjs-donebutton:active{filter:brightness(.92) !important}
+.introjs-prevbutton{background:var(--card) !important;color:var(--mid) !important;
+  border:1px solid var(--line) !important}
+.introjs-disabled{opacity:.42 !important;color:var(--soft) !important}
+
+/* Close control */
+.introjs-skipbutton{color:var(--soft) !important;font-size:1.25rem !important;
+  font-weight:400 !important;padding:14px 16px !important;line-height:1 !important;
+  background:none !important;border:0 !important}
+.introjs-skipbutton:hover{color:var(--ink) !important}
+
+.introjs-helperLayer{border-radius:14px !important;
+  box-shadow:0 0 0 2px var(--purple), 0 0 0 5000px rgba(24,20,34,.62) !important}
+.introjs-arrow.top,.introjs-arrow.bottom{border-color:transparent !important}
+.introjs-arrow.top{border-bottom-color:var(--card) !important}
+.introjs-arrow.bottom{border-top-color:var(--card) !important}
+.introjs-arrow.left{border-right-color:var(--card) !important}
+.introjs-arrow.right{border-left-color:var(--card) !important}
+
 .tour-link{background:none;border:0;color:#fff;opacity:.9;font-size:.8rem;font-family:inherit;
   text-decoration:underline;cursor:pointer;padding:0}
 .brief{margin-top:14px;padding:13px 14px;border-radius:11px;
