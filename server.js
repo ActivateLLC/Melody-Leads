@@ -64,6 +64,12 @@ CREATE INDEX IF NOT EXISTS leads_spam_idx     ON leads (is_spam);
 CREATE INDEX IF NOT EXISTS leads_follow_idx   ON leads (next_follow_up);
 CREATE INDEX IF NOT EXISTS leads_email_idx    ON leads (email);
 CREATE INDEX IF NOT EXISTS events_lead_idx    ON lead_events (lead_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS briefs (
+  day   DATE PRIMARY KEY,
+  body  TEXT NOT NULL,
+  made  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 async function init() { await pool.query(SCHEMA); console.log('schema ready'); }
@@ -157,6 +163,50 @@ filler, no "I hope this finds you well". She never overpromises on dates she has
 Write only the body of the email. No subject line, no signature block — she adds her own.
 If the enquiry is about booking her to speak, ask the two questions she always needs:
 the date and the audience. Keep it under 150 words.`;
+
+const BRIEF_SYSTEM = `You write a two or three sentence orientation for Melody Vachal, a
+keynote speaker, before she works through her enquiry queue.
+Be concrete and specific: name organisations, dates and numbers where they exist.
+Lead with whatever is most time-sensitive. Plain sentences, no bullet points, no greeting,
+no sign-off, no exclamation marks. If there is genuinely nothing pressing, say so briefly.
+Never invent detail that is not in the data.`;
+
+async function buildBrief() {
+  const { rows } = await pool.query(`
+    SELECT name, organization, tag, status, intent, event_date, audience, urgency,
+           next_follow_up, received_at
+      FROM leads
+     WHERE is_spam = false AND status NOT IN ('booked','cold')
+     ORDER BY (next_follow_up IS NOT NULL AND next_follow_up <= CURRENT_DATE) DESC,
+              received_at DESC
+     LIMIT 40`);
+  if (!rows.length) return 'Nothing open right now. The queue is clear.';
+  const lines = rows.map(r =>
+    [r.name || 'unnamed', r.organization, r.tag, r.status,
+     r.intent, r.event_date ? 'date ' + r.event_date : null,
+     r.audience ? 'audience ' + r.audience : null,
+     r.urgency === 'high' ? 'urgent' : null,
+     r.next_follow_up ? 'follow up ' + new Date(r.next_follow_up).toISOString().slice(0,10) : null
+    ].filter(Boolean).join(' | ')).join('\n');
+  const out = await askClaude(BRIEF_SYSTEM,
+    'Today is ' + new Date().toISOString().slice(0,10) + '.\nOpen enquiries:\n' + lines, 300);
+  return out || null;
+}
+
+async function todaysBrief() {
+  if (!AI_KEY) return null;
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    const cached = await pool.query('SELECT body FROM briefs WHERE day = $1', [day]);
+    if (cached.rows.length) return cached.rows[0].body;
+    const body = await buildBrief();
+    if (!body) return null;
+    await pool.query(
+      `INSERT INTO briefs (day, body) VALUES ($1,$2)
+       ON CONFLICT (day) DO UPDATE SET body = EXCLUDED.body, made = now()`, [day, body]);
+    return body;
+  } catch (e) { console.error('brief failed', e); return null; }
+}
 
 async function aiDraftReply(lead) {
   return askClaude(REPLY_SYSTEM,
@@ -362,6 +412,11 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
      border-radius:50%;background:var(--lav)}
 .timeline .when{font-size:.72rem;color:var(--soft)}
 .timeline .what{font-size:.89rem;color:var(--mid);white-space:pre-wrap}
+.brief{margin-top:14px;padding:13px 14px;border-radius:11px;
+  background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
+  font-size:.95rem;line-height:1.55;color:rgba(255,255,255,.94)}
+.brief::before{content:"Today";display:block;font-size:.66rem;letter-spacing:.2em;
+  text-transform:uppercase;color:rgba(255,255,255,.66);margin-bottom:6px}
 footer.credit{text-align:center;padding:26px 16px 34px;font-size:.8rem;color:var(--soft);
   letter-spacing:.02em}
 footer.credit b{font-weight:600;color:var(--mid)}
@@ -525,6 +580,8 @@ app.get('/', requireAuth, async (req, res) => {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  const brief = (view === 'due' && page === 1) ? await todaysBrief() : null;
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const due = Number(n.c_due), fresh = Number(n.c_new);
@@ -578,6 +635,7 @@ app.get('/', requireAuth, async (req, res) => {
         <div class="hello">${esc(greeting)}</div>
         <p class="line">${esc(headline)}</p>
         <div class="sub">${esc(subline)}</div>
+        ${brief ? `<div class="brief">${esc(brief)}</div>` : ''}
         <div class="stats">
           <div class="stat"><b data-to="${n.c_due}">0</b><span>Due</span></div>
           <div class="stat"><b data-to="${n.c_new}">0</b><span>New</span></div>
@@ -851,6 +909,13 @@ app.post('/lead/:id/quick', requireAuth, async (req, res) => {
   }
   await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'quick',$2)`, [id, to]);
   res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
+});
+
+app.post('/brief/refresh', requireAuth, async (req, res) => {
+  const day = new Date().toISOString().slice(0, 10);
+  await pool.query('DELETE FROM briefs WHERE day = $1', [day]);
+  await todaysBrief();
+  res.redirect('/?view=due');
 });
 
 app.get('/export', requireAuth, async (req, res) => {
