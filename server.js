@@ -258,6 +258,52 @@ async function aiDraftFollowUp(lead) {
     (lead.draft_reply ? '\nWhat you sent before:\n' + lead.draft_reply : ''), 600);
 }
 
+const ASK_SYSTEM = `You are the assistant inside Melody Vachal's enquiry inbox.
+Answer her question using ONLY the data given to you. If the data does not contain the answer,
+say so plainly rather than guessing. Be brief: two or three sentences, plain language, no lists
+unless she asked for one. Never invent a name, number, date or organisation.
+
+Return ONLY a JSON object, no prose, no code fences:
+{"answer": "...", "view": one of "due","new","contacted","booked","speaking","book","guide","all","spam" or null}
+Set "view" when looking at a particular list would help her act on the answer. Otherwise null.`;
+
+async function aiAsk(question) {
+  const counts = await pool.query(`
+    SELECT count(*) FILTER (WHERE NOT is_spam AND status='new')::int AS new,
+           count(*) FILTER (WHERE NOT is_spam AND status='contacted')::int AS contacted,
+           count(*) FILTER (WHERE NOT is_spam AND status='booked')::int AS booked,
+           count(*) FILTER (WHERE NOT is_spam AND status='cold')::int AS cold,
+           count(*) FILTER (WHERE is_spam)::int AS spam,
+           count(*) FILTER (WHERE NOT is_spam AND status NOT IN ('booked','cold')
+                     AND next_follow_up IS NOT NULL AND next_follow_up <= CURRENT_DATE)::int AS due,
+           COALESCE(sum(fee) FILTER (WHERE NOT is_spam AND status='booked'),0)::numeric AS booked_value
+      FROM leads`);
+
+  const leads = await pool.query(`
+    SELECT id,name,organization,email,tag,status,intent,event_date,audience,fee,
+           next_follow_up,last_contacted,received_at
+      FROM leads WHERE is_spam = false
+     ORDER BY received_at DESC LIMIT 60`);
+
+  const spam = await pool.query(
+    `SELECT name,organization,spam_reason,received_at FROM leads WHERE is_spam ORDER BY received_at DESC LIMIT 20`);
+
+  const eng = await pool.query(
+    `SELECT name,date_label,location,notes,starts_at FROM engagements ORDER BY starts_at ASC LIMIT 10`);
+
+  const context =
+    'Today is ' + new Date().toISOString().slice(0,10) + '.\n' +
+    'Counts: ' + JSON.stringify(counts.rows[0]) + '\n' +
+    'Enquiries (most recent first): ' + JSON.stringify(leads.rows) + '\n' +
+    'Filed as spam: ' + JSON.stringify(spam.rows) + '\n' +
+    'Upcoming engagements: ' + JSON.stringify(eng.rows);
+
+  const out = await askClaude(ASK_SYSTEM, 'Her question: ' + question + '\n\nData:\n' + context, 500);
+  if (!out) return null;
+  try { return JSON.parse(out.replace(/```json|```/g, '').trim()); }
+  catch (e) { return { answer: out.slice(0, 600), view: null }; }
+}
+
 async function aiDraftReply(lead) {
   return askClaude(REPLY_SYSTEM,
     'Reply to this enquiry.\n\nFrom: ' + (lead.name || 'unknown') +
@@ -404,6 +450,23 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .stat span{font-size:.68rem;letter-spacing:.11em;text-transform:uppercase;
            color:rgba(255,255,255,.74)}
 
+.ask{display:flex;gap:7px;margin-bottom:12px}
+.ask input{flex:1;padding:14px;border:1px solid var(--lav);border-radius:11px;font-size:1rem;
+  background:var(--card);min-height:48px;font-family:inherit}
+.ask input:focus{outline:none;box-shadow:0 0 0 3px var(--lav-soft)}
+.ask button{padding:14px 20px;border:0;border-radius:11px;background:var(--deep);color:#fff;
+  font-weight:600;font-size:.95rem;min-height:48px;font-family:inherit}
+.answer{background:var(--card);border:1px solid var(--lav);border-radius:13px;
+  padding:14px 15px;margin-bottom:14px}
+.answer-q{font-size:.8rem;color:var(--soft);margin-bottom:7px}
+.answer-q::before{content:"You asked: "}
+.answer-a{font-size:1rem;line-height:1.55;color:var(--ink)}
+.answer-go{display:inline-block;margin-top:11px;font-size:.86rem;font-weight:600;color:var(--deep);
+  text-decoration:none;border-bottom:1px solid var(--lav);padding-bottom:2px}
+@keyframes mvpulse{0%{box-shadow:0 0 0 0 rgba(118,112,179,.55)}
+                   70%{box-shadow:0 0 0 12px rgba(118,112,179,0)}
+                   100%{box-shadow:0 0 0 0 rgba(118,112,179,0)}}
+.tab.flash{animation:mvpulse 1.15s ease-out 2}
 .diary{background:var(--card);border:1px solid var(--line);border-radius:13px;
   padding:14px 15px;margin-bottom:14px}
 .diary-label{font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;
@@ -945,7 +1008,17 @@ app.get('/', requireAuth, async (req, res) => {
             '</div></div>';
         }).join('')}
       </div>` : ''}
-      <div class="tabs">${tabs}</div>
+      <form class="ask" method="post" action="/ask">
+        <input name="q" placeholder="Ask about your enquiries\u2026"
+               value="" autocomplete="off" aria-label="Ask a question">
+        <button type="submit">Ask</button>
+      </form>
+      ${req.query.answer ? `<div class="answer">
+        <div class="answer-q">${esc(req.query.q_asked || '')}</div>
+        <div class="answer-a">${esc(req.query.answer)}</div>
+        ${req.query.focus ? `<a class="answer-go" href="/?view=${esc(req.query.focus)}&amp;hl=1">Show me \u2192</a>` : ''}
+      </div>` : ''}
+      <div class="tabs"${req.query.hl ? ' data-highlight="1"' : ''}>${tabs}</div>
       <form class="search" method="get" action="/">
         <input type="hidden" name="view" value="${esc(view)}">
         <input name="q" value="${esc(q)}" placeholder="Search name, email, organisation, message">
@@ -975,6 +1048,16 @@ app.get('/', requireAuth, async (req, res) => {
       <div class="row"><a class="btn ghost" href="/export?view=${esc(view)}">Download CSV</a></div>
     </div>
     <script>
+    (function(){
+      var tabs = document.querySelector('.tabs[data-highlight]');
+      if (tabs) {
+        var on = tabs.querySelector('.tab.on');
+        if (on) {
+          on.classList.add('flash');
+          on.scrollIntoView({ block: 'nearest', inline: 'center' });
+        }
+      }
+    })();
     (function(){
       var reduce = window.matchMedia &&
                    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1386,6 +1469,18 @@ app.post('/lead/:id/delete', requireAuth, async (req, res) => {
   if (!Number.isInteger(id)) return res.status(400).send('bad id');
   await pool.query('DELETE FROM leads WHERE id=$1', [id]);   // events cascade
   res.redirect('/?view=' + encodeURIComponent(req.body.back || 'all'));
+});
+
+app.post('/ask', requireAuth, async (req, res) => {
+  const q = (req.body.q || '').toString().trim().slice(0, 500);
+  if (!q) return res.redirect('/');
+  const out = await aiAsk(q);
+  const params = new URLSearchParams();
+  params.set('q_asked', q);
+  params.set('answer', out && out.answer ? out.answer :
+    'I could not answer that from what is in here.');
+  if (out && out.view) params.set('focus', out.view);
+  res.redirect('/?' + params.toString());
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
