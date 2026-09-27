@@ -1548,10 +1548,21 @@ app.post('/lead/:id/undo', requireAuth, async (req, res) => {
 function looksMachineGenerated(name) {
   if (!name) return false;
   const n = String(name).trim();
-  if (n.indexOf(' ') !== -1) return false;              // real names usually have a space
-  if (!/^[A-Za-z0-9]{8,14}$/.test(n)) return false;     // fixed-length alphanumeric handle
+  if (!n) return false;
+  if (n.indexOf(' ') !== -1) return false;          // a first and last name reads as human
+  if (!/^[A-Za-z0-9]{3,16}$/.test(n)) return false; // anything with punctuation is left alone
+
   const hasUpper = /[A-Z]/.test(n), hasLower = /[a-z]/.test(n), hasDigit = /[0-9]/.test(n);
-  return (hasUpper && hasLower) || hasDigit;            // mixed case or digits mid-word
+  const vowels = (n.match(/[aeiouAEIOU]/g) || []).length;
+  const letters = (n.match(/[A-Za-z]/g) || []).length;
+
+  if (hasDigit && letters >= 3) return true;                 // Kj3nP8qR
+  if (hasUpper && hasLower && n.length >= 7) return true;    // 7IuQXJlJLB
+  if (n.length >= 6 && n === n.toUpperCase()) return true;   // OOGDCRTDTP
+  if (letters >= 4 && vowels === 0) return true;             // Xqfx, zzkjl
+  if (letters >= 5 && vowels / letters < 0.25) return true;  // Dgoiwq, wChZFYT
+  if (/[bcdfghjklmnpqrstvwxz]{4,}/i.test(n)) return true;    // four consonants running
+  return false;
 }
 
 app.post('/import', async (req, res) => {
@@ -1651,6 +1662,29 @@ app.post('/import/webflow', async (req, res) => {
     console.error('webflow import failed', e);
     res.status(500).json({ ok:false, error: String(e).slice(0,200), added, skipped });
   }
+});
+
+app.post('/retriage', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  // Only rows nobody has worked yet — never re-file something she has acted on.
+  const { rows } = await pool.query(
+    `SELECT id, name, message, raw FROM leads
+      WHERE is_spam = false AND status = 'new' AND last_contacted IS NULL`);
+  let moved = 0;
+  for (const r of rows) {
+    const fields = (r.raw && r.raw.fields) || {};
+    const t = triage(fields, r.message);
+    const machine = looksMachineGenerated(r.name);
+    const noName = !r.name && !r.message;   // a bare email with nothing else
+    if (t.spam || machine || noName) {
+      await pool.query(
+        `UPDATE leads SET is_spam=true, status='spam', spam_reason=$1, updated_at=now()
+          WHERE id=$2`,
+        [t.reason || (machine ? 'machine-generated name' : 'no name and no message'), r.id]);
+      moved++;
+    }
+  }
+  res.json({ ok: true, checked: rows.length, moved });
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
