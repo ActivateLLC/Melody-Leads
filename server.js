@@ -362,12 +362,32 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
      border-radius:50%;background:var(--lav)}
 .timeline .when{font-size:.72rem;color:var(--soft)}
 .timeline .what{font-size:.89rem;color:var(--mid);white-space:pre-wrap}
-.login{max-width:330px;margin:12vh auto;background:var(--card);padding:24px;border-radius:15px;
-       border:1px solid var(--line);box-shadow:0 12px 30px -20px rgba(36,31,43,.35)}
-.login input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;
-             margin-bottom:11px}
-.login button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--purple);
-              color:#fff;font-weight:600}
+.signin-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:
+    radial-gradient(1100px 520px at 50% -8%, #EDEAF7 0%, rgba(237,234,247,0) 62%),
+    var(--paper);}
+.signin{width:100%;max-width:400px}
+.signin .mark{display:flex;align-items:center;gap:11px;margin-bottom:26px}
+.signin .dot{width:38px;height:38px;border-radius:11px;flex:none;
+  background:linear-gradient(150deg,#5C5695,#8A7FC0);
+  box-shadow:0 6px 16px -8px rgba(92,86,149,.7)}
+.signin .mark .name{font-weight:700;font-size:1.05rem;letter-spacing:-.01em;line-height:1.2}
+.signin .mark .role{font-size:.82rem;color:var(--soft);line-height:1.3}
+.signin .card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+  padding:26px 24px 24px;box-shadow:0 26px 50px -34px rgba(36,31,43,.42)}
+.signin h1{margin:0 0 6px;font-size:1.28rem;font-weight:700;letter-spacing:-.015em}
+.signin .lede{margin:0 0 20px;font-size:.95rem;color:var(--mid);line-height:1.5}
+.signin label{display:block;font-size:.78rem;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--soft);margin-bottom:7px}
+.signin input{width:100%;padding:15px 14px;border:1px solid var(--line);border-radius:11px;
+  font-size:1.05rem;background:var(--paper);min-height:52px;font-family:inherit}
+.signin input:focus{outline:none;border-color:var(--lav);box-shadow:0 0 0 4px var(--lav-soft);
+  background:var(--card)}
+.signin button{width:100%;margin-top:16px;padding:15px;border:0;border-radius:11px;
+  background:var(--purple);color:#fff;font-weight:600;font-size:1rem;min-height:52px;
+  font-family:inherit;cursor:pointer}
+.signin button:active{filter:brightness(.93)}
+.signin .foot{margin-top:18px;font-size:.8rem;color:var(--soft);text-align:center;line-height:1.5}
 .err{color:#9A5A48;font-size:.84rem;margin-bottom:9px}
 
 .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
@@ -391,11 +411,26 @@ const layout = (title, body) => `<!doctype html><html lang="en"><head>
 /* ---------------------------------------------------------------- login */
 
 app.get('/login', (req, res) => res.send(layout('Sign in', `
-  <div class="login"><h2 style="margin:0 0 14px;font-size:1.05rem">Melody &mdash; leads</h2>
-  ${req.query.bad ? '<div class="err">That password did not work.</div>' : ''}
-  <form method="post" action="/login">
-    <input type="password" name="password" placeholder="Password" autofocus>
-    <button type="submit">Sign in</button></form></div>`)));
+  <div class="signin-wrap"><div class="signin">
+    <div class="mark">
+      <div class="dot"></div>
+      <div>
+        <div class="name">Melody Vachal</div>
+        <div class="role">Enquiries &amp; follow-ups</div>
+      </div>
+    </div>
+    <div class="card">
+      <h1>Welcome back</h1>
+      <p class="lede">Everything that came in through melodyvachal.com, in one place.</p>
+      ${req.query.bad ? '<div class="err">That password did not work. Try again.</div>' : ''}
+      <form method="post" action="/login">
+        <label for="pw">Password</label>
+        <input id="pw" type="password" name="password" autofocus autocomplete="current-password">
+        <button type="submit">Sign in</button>
+      </form>
+    </div>
+    <p class="foot">Spam is filed separately, so this list stays worth reading.</p>
+  </div></div>`)));
 
 app.post('/login', (req, res) => {
   if (PASSWORD && req.body.password === PASSWORD) {
