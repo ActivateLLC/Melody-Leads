@@ -1,3 +1,28 @@
+app.post('/lead/:id/quick', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const to = req.body.to;
+  if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
+
+  const prev = await pool.query('SELECT status, is_spam, name, email FROM leads WHERE id=$1', [id]);
+  if (!prev.rows.length) return res.redirect('/');
+  const was = prev.rows[0].is_spam ? 'spam' : prev.rows[0].status;
+  const who = prev.rows[0].name || prev.rows[0].email || 'That enquiry';
+
+  if (to === 'spam') {
+    await pool.query(`UPDATE leads SET is_spam=true, status='spam',
+      spam_reason='marked by hand', updated_at=now() WHERE id=$1`, [id]);
+  } else {
+    await pool.query(`UPDATE leads SET status=$1, is_spam=false,
+      last_contacted=CASE WHEN $1='contacted' THEN now() ELSE last_contacted END,
+      updated_at=now() WHERE id=$2`, [to, id]);
+  }
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'quick',$2)`, [id, to]);
+
+  const p = new URLSearchParams({ view: req.body.back || 'due',
+    done: String(id), act: to, was: was, who: who });
+  res.redirect('/?' + p.toString());
+});
+
 'use strict';
 
 const express = require('express');
@@ -450,6 +475,14 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .stat span{font-size:.68rem;letter-spacing:.11em;text-transform:uppercase;
            color:rgba(255,255,255,.74)}
 
+.toast{background:var(--good-bg);border:1px solid #CFE3D6;border-radius:13px;
+  padding:13px 15px;margin-bottom:13px}
+.toast-text{font-size:.95rem;line-height:1.5;color:var(--ink)}
+.toast-acts{display:flex;gap:9px;margin-top:10px;align-items:center}
+.toast-acts form{margin:0}
+.toast-btn{border:1px solid #CFE3D6;background:var(--card);color:var(--good);
+  border-radius:999px;padding:9px 16px;font-size:.85rem;font-weight:600;font-family:inherit;
+  text-decoration:none;display:inline-block;cursor:pointer;min-height:42px;line-height:24px}
 .ask{display:flex;gap:7px;margin-bottom:12px}
 .ask input{flex:1;padding:14px;border:1px solid var(--lav);border-radius:11px;font-size:1rem;
   background:var(--card);min-height:48px;font-family:inherit}
@@ -928,12 +961,16 @@ app.get('/', requireAuth, async (req, res) => {
     ? (due === 1 ? 'One follow-up is due.' : due + ' follow-ups are due.')
     : fresh > 0
       ? (fresh === 1 ? 'One new enquiry to read.' : fresh + ' new enquiries to read.')
-      : 'You are all caught up.';
+      : (Number(n.c_contacted) > 0 || Number(n.c_all) > 0
+          ? 'Nothing needs you right now.'
+          : 'Nothing has come in yet.');
   const subline = due > 0
     ? 'Oldest first, so the ones waiting longest come up top.'
     : fresh > 0
       ? 'Nothing overdue — these came in since you last looked.'
-      : 'Nothing due and nothing new. Spam has been filed on its own.';
+      : (Number(n.c_all) > 0
+          ? 'Everything is either answered, booked or waiting on them. Use the tabs to look back over any of it.'
+          : 'When someone fills in a form on your website, it will appear here.');
 
   const items = rows.length ? rows.map(l => {
     const overdue = l.next_follow_up &&
@@ -973,7 +1010,14 @@ app.get('/', requireAuth, async (req, res) => {
             <input type="hidden" name="back" value="${esc(view)}"><button type="submit" class="muted">Spam</button></form>
         </div>`}
       </div></div>`;
-  }).join('') : `<div class="empty">Nothing here.</div>`;
+  }).join('') : `<div class="empty">${
+      view === 'due'       ? 'Nothing is due today. Anything you saved for later will appear here on the day.'
+    : view === 'new'       ? 'No unread enquiries. Answered ones are under Contacted.'
+    : view === 'contacted' ? 'Nothing here yet. Enquiries you have replied to will be listed here.'
+    : view === 'booked'    ? 'No confirmed bookings recorded yet.'
+    : view === 'spam'      ? 'Nothing has been filed as spam.'
+    : view === 'all'       ? 'No enquiries yet. They will appear here as they come in.'
+    : 'Nothing under this heading yet.'}</div>`;
 
   res.send(layout('Leads', `
     <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="">Melody &mdash; leads</h1>
@@ -1008,6 +1052,33 @@ app.get('/', requireAuth, async (req, res) => {
             '</div></div>';
         }).join('')}
       </div>` : ''}
+      ${req.query.done ? (function(){
+        var act = req.query.act || '';
+        var who = esc(req.query.who || 'That enquiry');
+        var id  = parseInt(req.query.done, 10);
+        var label =
+          act === 'contacted' ? 'marked as contacted' :
+          act === 'booked'    ? 'marked as booked' :
+          act === 'cold'      ? 'set aside' :
+          act === 'spam'      ? 'filed as spam' :
+          act === 'new'       ? 'put back in New' :
+          act.indexOf('snoozed-') === 0
+            ? (act === 'snoozed-1' ? 'saved for tomorrow' : 'saved for next week')
+            : 'updated';
+        var moved = act.indexOf('snoozed-') !== 0;
+        return '<div class="toast">' +
+          '<div class="toast-text"><b>' + who + '</b> ' + label + '.' +
+          (moved ? ' Still here \u2014 now under <b>' + esc(act === 'spam' ? 'Spam' :
+             act.charAt(0).toUpperCase() + act.slice(1)) + '</b>.' :
+                   ' It will come back to Due on the day.') + '</div>' +
+          '<div class="toast-acts">' +
+            '<a class="toast-btn" href="/lead/' + id + '">Open it</a>' +
+            (req.query.was ? '<form method="post" action="/lead/' + id + '/undo">' +
+              '<input type="hidden" name="to" value="' + esc(req.query.was) + '">' +
+              '<input type="hidden" name="back" value="' + esc(view) + '">' +
+              '<button class="toast-btn" type="submit">Undo</button></form>' : '') +
+          '</div></div>';
+      })() : ''}
       <form class="ask" method="post" action="/ask">
         <input name="q" placeholder="Ask about your enquiries\u2026"
                value="" autocomplete="off" aria-label="Ask a question">
@@ -1141,6 +1212,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       case 'received':   return { icon: '\u2709', line: 'Enquiry arrived ' + b.replace(/^via /, 'through the ') };
       case 'draft':      return { icon: '\u270E', line: b ? b.charAt(0).toUpperCase() + b.slice(1) : 'A reply was drafted for you to review' };
       case 'revise':     return { icon: '\u2726', line: 'Draft ' + b };
+      case 'undo':       return { icon: '\u21A9', line: 'Undone \u2014 ' + b };
       case 'contacted':  return { icon: '\u2192', line: 'You marked this as contacted' };
       case 'status':     return { icon: '\u21BB', line: 'Status changed: ' + b };
       case 'note':       return { icon: '\u201C', line: b };
@@ -1388,7 +1460,11 @@ app.post('/lead/:id/snooze', requireAuth, async (req, res) => {
     [days, id]);
   await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'snooze',$2)`,
     [id, 'follow up in ' + days + ' day' + (days === 1 ? '' : 's')]);
-  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
+  const nm = await pool.query('SELECT name,email FROM leads WHERE id=$1', [id]);
+  const who = nm.rows.length ? (nm.rows[0].name || nm.rows[0].email || 'That enquiry') : 'That enquiry';
+  const p = new URLSearchParams({ view: req.body.back || 'due', done: String(id),
+    act: days === 1 ? 'snoozed-1' : 'snoozed-' + days, who: who });
+  res.redirect('/?' + p.toString());
 });
 
 app.post('/lead/:id/quick', requireAuth, async (req, res) => {
@@ -1462,6 +1538,18 @@ app.post('/engagements/sync', async (req, res) => {
     n++;
   }
   res.json({ ok: true, synced: n });
+});
+
+app.post('/lead/:id/undo', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const to = req.body.to;
+  if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
+  await pool.query(`UPDATE leads SET status=$1, is_spam=($1='spam'),
+    spam_reason=CASE WHEN $1='spam' THEN spam_reason ELSE NULL END,
+    updated_at=now() WHERE id=$2`, [to, id]);
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'undo',$2)`,
+    [id, 'put back to ' + to]);
+  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
 });
 
 app.post('/lead/:id/delete', requireAuth, async (req, res) => {
