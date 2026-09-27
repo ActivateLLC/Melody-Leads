@@ -466,24 +466,6 @@ body.tour-on header{position:static !important}
 
 .tour-link{background:none;border:0;color:#fff;opacity:.9;font-size:.8rem;font-family:inherit;
   text-decoration:underline;cursor:pointer;padding:0}
-
-/* On phones the tooltip is a bottom sheet: always in the same place, always
-   reachable, whatever intro.js works out about the highlighted element. */
-@media (max-width: 560px){
-  .introjs-tooltipReferenceLayer{position:fixed !important;inset:auto 0 0 0 !important;
-    width:100% !important;height:auto !important;transform:none !important;
-    pointer-events:none !important}
-  .introjs-tooltip{position:fixed !important;left:12px !important;right:12px !important;
-    bottom:calc(14px + env(safe-area-inset-bottom, 0px)) !important;top:auto !important;
-    width:auto !important;max-width:none !important;min-width:0 !important;
-    transform:none !important;margin:0 !important;pointer-events:auto !important}
-  .introjs-arrow{display:none !important}
-  .introjs-tooltipbuttons{display:flex !important;gap:10px !important;
-    justify-content:space-between !important;align-items:center !important}
-  .introjs-tooltipbuttons .introjs-button{flex:1 1 auto !important;text-align:center !important;
-    min-height:46px !important;display:inline-flex !important;align-items:center !important;
-    justify-content:center !important}
-}
 .brief{margin-top:14px;padding:13px 14px;border-radius:11px;max-height:9.5em;overflow:auto;
   -webkit-overflow-scrolling:touch;
   background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
