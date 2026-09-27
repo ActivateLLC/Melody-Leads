@@ -429,8 +429,20 @@ app.get('/', requireAuth, async (req, res) => {
   }
 
   const order = view === 'due' ? 'next_follow_up ASC' : 'received_at DESC';
+  const PAGE = 50;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const offset = (page - 1) * PAGE;
+
+  const totalQ = await pool.query(
+    `SELECT count(*)::int AS n FROM leads WHERE ${where.join(' AND ')}`, params);
+  const total = totalQ.rows[0].n;
+
   const { rows } = await pool.query(
-    `SELECT * FROM leads WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 300`, params);
+    `SELECT l.*,
+            (SELECT count(*)::int FROM leads o
+              WHERE o.email IS NOT NULL AND o.email = l.email) AS submissions
+       FROM leads l WHERE ${where.join(' AND ')}
+      ORDER BY ${order} LIMIT ${PAGE} OFFSET ${offset}`, params);
 
   const c = await pool.query(`
     SELECT
@@ -491,6 +503,7 @@ app.get('/', requireAuth, async (req, res) => {
           <span class="pill">${esc(l.tag)}</span>
           ${l.is_spam ? `<span class="pill spam">${esc(l.spam_reason || 'spam')}</span>` : ''}
           ${overdue ? `<span class="pill due">follow up</span>` : ''}
+          ${l.submissions > 1 ? `<span class="pill">${l.submissions}\u00d7</span>` : ''}
         </div>
         <p class="who"><a href="/lead/${l.id}">${esc(l.name || l.email || 'No name')}</a></p>
         <div class="meta">${esc(l.organization || '')}${l.email ? ' &middot; ' + esc(l.email) : ''}</div>
@@ -531,8 +544,13 @@ app.get('/', requireAuth, async (req, res) => {
           <button type="submit">Apply</button>
         </div>
       </form>
-      <p class="count">${rows.length} shown</p>
+      <p class="count">${total} total${total > PAGE ? ` \u00b7 page ${page} of ${Math.ceil(total / PAGE)}` : ''}</p>
       ${items}
+      ${total > PAGE ? `<div class="row" style="justify-content:space-between">
+        ${page > 1 ? `<a class="btn ghost" href="/?view=${esc(view)}&page=${page - 1}${q ? '&q=' + encodeURIComponent(q) : ''}">Newer</a>` : '<span></span>'}
+        ${offset + rows.length < total ? `<a class="btn ghost" href="/?view=${esc(view)}&page=${page + 1}${q ? '&q=' + encodeURIComponent(q) : ''}">Older</a>` : '<span></span>'}
+      </div>` : ''}
+      <div class="row"><a class="btn ghost" href="/export?view=${esc(view)}">Download CSV</a></div>
     </div>
     <script>
     (function(){
@@ -746,6 +764,36 @@ async function nudgeSweep() {
 }
 setInterval(nudgeSweep, 6 * 60 * 60 * 1000);
 setTimeout(nudgeSweep, 60 * 1000);
+
+app.get('/export', requireAuth, async (req, res) => {
+  const view = (req.query.view || 'all').toLowerCase();
+  const clause = view === 'spam' ? 'is_spam = true' : 'is_spam = false';
+  const { rows } = await pool.query(
+    `SELECT received_at,name,email,phone,organization,form_name,tag,status,intent,
+            event_date,audience,urgency,next_follow_up,last_contacted,message
+       FROM leads WHERE ${clause} ORDER BY received_at DESC`);
+
+  const cell = v => {
+    if (v == null) return '';
+    const s = String(v).replace(/"/g, '""');
+    return /[",\n]/.test(s) ? '"' + s + '"' : s;
+  };
+  const head = ['Received','Name','Email','Phone','Organisation','Form','Tag','Status',
+                'Intent','Event date','Audience','Urgency','Next follow-up','Last contacted','Message'];
+  const body = rows.map(r => [
+    r.received_at ? new Date(r.received_at).toISOString() : '',
+    r.name, r.email, r.phone, r.organization, r.form_name, r.tag, r.status, r.intent,
+    r.event_date, r.audience, r.urgency,
+    r.next_follow_up ? new Date(r.next_follow_up).toISOString().slice(0,10) : '',
+    r.last_contacted ? new Date(r.last_contacted).toISOString() : '',
+    r.message
+  ].map(cell).join(','));
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition',
+    'attachment; filename="melody-leads-' + new Date().toISOString().slice(0,10) + '.csv"');
+  res.send('\ufeff' + [head.join(','), ...body].join('\n'));
+});
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
 
