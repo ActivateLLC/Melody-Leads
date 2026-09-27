@@ -208,6 +208,39 @@ async function todaysBrief() {
   } catch (e) { console.error('brief failed', e); return null; }
 }
 
+const FOLLOWUP_SYSTEM = REPLY_SYSTEM + `
+This is a FOLLOW-UP: she already replied and has not heard back. Acknowledge that lightly
+without guilt-tripping, keep it shorter than a first reply, and make it easy to answer with
+one line. Do not repeat everything from the first message.`;
+
+const REVISE_MODES = {
+  shorter:  'Cut it down. Keep every point that matters, lose everything else. Aim for half the length.',
+  warmer:   'Make it warmer and more personal, without becoming gushing or adding exclamation marks.',
+  direct:   'Make it more direct and businesslike. Shorter sentences, clearer ask, no softening.',
+  grammar:  'Fix spelling, grammar and punctuation only. Do not change the wording, tone, length or meaning otherwise.'
+};
+
+async function aiRevise(text, mode, lead) {
+  var instruction = REVISE_MODES[mode];
+  if (!instruction) return null;
+  var sys = mode === 'grammar'
+    ? 'You correct spelling, grammar and punctuation in an email draft. Return only the corrected text, nothing else. Change nothing but errors.'
+    : REPLY_SYSTEM + '\nYou are revising an existing draft. Return only the revised body.';
+  return askClaude(sys,
+    instruction + '\n\nContext: enquiry from ' + (lead.name || 'someone') +
+    (lead.organization ? ' at ' + lead.organization : '') +
+    '\n\nDraft to revise:\n' + text, 700);
+}
+
+async function aiDraftFollowUp(lead) {
+  return askClaude(FOLLOWUP_SYSTEM,
+    'Write a follow-up.\n\nTo: ' + (lead.name || 'unknown') +
+    (lead.organization ? ' at ' + lead.organization : '') +
+    '\nTheir original message: ' + (lead.message || '(none)') +
+    '\nYou last contacted them: ' + (lead.last_contacted ? new Date(lead.last_contacted).toDateString() : 'unknown') +
+    (lead.draft_reply ? '\nWhat you sent before:\n' + lead.draft_reply : ''), 600);
+}
+
 async function aiDraftReply(lead) {
   return askClaude(REPLY_SYSTEM,
     'Reply to this enquiry.\n\nFrom: ' + (lead.name || 'unknown') +
@@ -396,6 +429,17 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px;
       margin-bottom:12px}
 .card h2{margin:0 0 4px;font-size:1.2rem;letter-spacing:-.01em}
+.draft-box{width:100%;min-height:190px;border:1px solid var(--line);border-radius:11px;
+  padding:14px;font-size:1rem;line-height:1.6;font-family:inherit;background:var(--paper);
+  color:var(--ink);resize:vertical}
+.draft-box:focus{outline:none;border-color:var(--lav);box-shadow:0 0 0 3px var(--lav-soft);background:#fff}
+.revise-label{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--soft);
+  margin:14px 0 7px}
+.revise{display:flex;gap:7px;flex-wrap:wrap}
+.chip{border:1px solid var(--lav);background:var(--card);color:var(--deep);border-radius:999px;
+  padding:10px 15px;font-size:.86rem;font-family:inherit;font-weight:600;cursor:pointer;
+  min-height:44px}
+.chip:active{background:var(--lav-soft)}
 .nextstep{margin:12px 0 4px;padding:12px 14px;border-radius:11px;
   background:var(--lav-soft);border:1px solid #DDD7EE;color:var(--deep);
   font-size:.96rem;line-height:1.5;font-weight:500}
@@ -941,7 +985,8 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
     var b = e.body || '';
     switch (e.kind) {
       case 'received':   return { icon: '\u2709', line: 'Enquiry arrived ' + b.replace(/^via /, 'through the ') };
-      case 'draft':      return { icon: '\u270E', line: 'A reply was drafted for you to review' };
+      case 'draft':      return { icon: '\u270E', line: b ? b.charAt(0).toUpperCase() + b.slice(1) : 'A reply was drafted for you to review' };
+      case 'revise':     return { icon: '\u2726', line: 'Draft ' + b };
       case 'contacted':  return { icon: '\u2192', line: 'You marked this as contacted' };
       case 'status':     return { icon: '\u21BB', line: 'Status changed: ' + b };
       case 'note':       return { icon: '\u201C', line: b };
@@ -988,17 +1033,32 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       </div>
 
       <div class="card">
-        <div class="meta">Suggested reply${l.draft_reply ? '' : ' &mdash; none yet'}</div>
-        ${l.draft_reply
-          ? `<div class="msg" id="draft">${esc(l.draft_reply)}</div>
-             <div class="row">
-               <a class="btn" href="mailto:${esc(l.email || '')}?body=${encodeURIComponent(l.draft_reply)}">Open in email</a>
-               <button class="btn ghost" type="button" onclick="navigator.clipboard.writeText(document.getElementById('draft').innerText);this.textContent='Copied'">Copy</button>
-             </div>`
-          : ''}
+        <div class="meta">Reply${l.draft_reply ? '' : ' &mdash; nothing drafted yet'}</div>
+
         <form method="post" action="/lead/${l.id}/draft" class="row">
-          <button class="btn ghost" type="submit">${l.draft_reply ? 'Rewrite' : 'Draft a reply'}</button>
+          <button class="btn ghost" type="submit" name="kind" value="reply">
+            ${l.draft_reply ? 'Rewrite from scratch' : 'Draft a reply'}</button>
+          ${l.last_contacted ? `<button class="btn ghost" type="submit" name="kind" value="followup">Draft a follow-up</button>` : ''}
         </form>
+
+        ${l.draft_reply ? `
+        <form method="post" action="/lead/${l.id}/draft-save">
+          <textarea name="draft" id="draft" class="draft-box" spellcheck="true"
+            autocapitalize="sentences" autocorrect="on">${esc(l.draft_reply)}</textarea>
+          <div class="revise-label">Revise</div>
+          <div class="revise">
+            <button class="chip" type="submit" formaction="/lead/${l.id}/revise" name="mode" value="shorter">Shorter</button>
+            <button class="chip" type="submit" formaction="/lead/${l.id}/revise" name="mode" value="warmer">Warmer</button>
+            <button class="chip" type="submit" formaction="/lead/${l.id}/revise" name="mode" value="direct">More direct</button>
+            <button class="chip" type="submit" formaction="/lead/${l.id}/revise" name="mode" value="grammar">Fix spelling</button>
+          </div>
+          <div class="row">
+            <button class="btn" type="submit">Save draft</button>
+            <a class="btn ghost" href="mailto:${esc(l.email || '')}?subject=${encodeURIComponent('Re: your enquiry')}&body=${encodeURIComponent(l.draft_reply)}">Open in email</a>
+            <button class="btn ghost" type="button"
+              onclick="navigator.clipboard.writeText(document.getElementById('draft').value);this.textContent='Copied'">Copy</button>
+          </div>
+        </form>` : ''}
       </div>
 
       <div class="card">
@@ -1098,10 +1158,42 @@ app.post('/lead/:id/draft', requireAuth, async (req, res) => {
   if (!Number.isInteger(id)) return res.status(400).send('bad id');
   const { rows } = await pool.query('SELECT * FROM leads WHERE id=$1', [id]);
   if (!rows.length) return res.status(404).send('not found');
-  const draft = await aiDraftReply(rows[0]);
+  const kind = req.body.kind === 'followup' ? 'followup' : 'reply';
+  const draft = kind === 'followup' ? await aiDraftFollowUp(rows[0]) : await aiDraftReply(rows[0]);
   if (draft) {
     await pool.query('UPDATE leads SET draft_reply=$1 WHERE id=$2', [draft, id]);
-    await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'draft','reply drafted')`, [id]);
+    await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'draft',$2)`,
+      [id, kind === 'followup' ? 'follow-up drafted' : 'reply drafted']);
+  }
+  res.redirect('/lead/' + id);
+});
+
+app.post('/lead/:id/draft-save', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+  await pool.query('UPDATE leads SET draft_reply=$1, updated_at=now() WHERE id=$2',
+    [req.body.draft || '', id]);
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'draft','you edited the draft')`, [id]);
+  res.redirect('/lead/' + id);
+});
+
+app.post('/lead/:id/revise', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+  const text = req.body.draft || '';
+  const mode = req.body.mode;
+  if (!text.trim()) return res.redirect('/lead/' + id);
+
+  // Keep whatever she typed, even if the model is unavailable.
+  await pool.query('UPDATE leads SET draft_reply=$1 WHERE id=$2', [text, id]);
+
+  const { rows } = await pool.query('SELECT * FROM leads WHERE id=$1', [id]);
+  const revised = rows.length ? await aiRevise(text, mode, rows[0]) : null;
+  if (revised) {
+    await pool.query('UPDATE leads SET draft_reply=$1, updated_at=now() WHERE id=$2', [revised, id]);
+    const label = { shorter:'made shorter', warmer:'made warmer',
+                    direct:'made more direct', grammar:'spelling and grammar fixed' }[mode] || mode;
+    await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'revise',$2)`, [id, label]);
   }
   res.redirect('/lead/' + id);
 });
