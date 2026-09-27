@@ -20,6 +20,7 @@ const pool = new Pool({
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(express.static('public', { maxAge: '7d' }));
 
 /* --------------------------------------------------------------- schema */
 
@@ -638,6 +639,21 @@ footer.credit b{font-weight:600;color:var(--mid)}
 
 const layout = (title, body) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Every enquiry from melodyvachal.com in one place — spam filed on its own, replies drafted, nothing waiting that you cannot see.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Melody Vachal">
+<meta property="og:title" content="Melody Vachal — enquiries &amp; follow-ups">
+<meta property="og:description" content="Every enquiry in one place. Spam filed on its own. Replies drafted for you.">
+<meta property="og:url" content="https://leads.melodyvachal.com/">
+<meta property="og:image" content="https://leads.melodyvachal.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Melody Vachal — every enquiry, in one place">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Melody Vachal — enquiries &amp; follow-ups">
+<meta name="twitter:description" content="Every enquiry in one place. Spam filed on its own. Replies drafted for you.">
+<meta name="twitter:image" content="https://leads.melodyvachal.com/og.png">
+<meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237670B3'/%3E%3Cpath d='M9 22V10l7 7 7-7v12' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>${esc(title)}</title>
 <style>${CSS}</style></head><body>${body}
