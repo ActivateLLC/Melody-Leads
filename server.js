@@ -1742,6 +1742,9 @@ app.get('/events', requireAuth, async (req, res) => {
         <div class="row">
           <button class="btn" type="submit">Save</button>
           <button class="btn ghost" type="submit" formaction="/events/publish">Save &amp; put on my website</button>
+          <button class="btn ghost" type="submit" formaction="/events/remove"
+            onclick="return confirm('Remove this event? It will come off your website too.')"
+            style="color:var(--due);border-color:#E8CDBF">Remove</button>
         </div>
       </form>
     </div>`;
@@ -1832,6 +1835,24 @@ app.post('/events/publish', requireAuth, async (req, res) => {
   await webflow('/sites/' + WEBFLOW_SITE + '/publish', 'POST',
     { customDomains: ['63fe5f69885ca03484ed5548', '63fe562fae944c48aa00df88'] });
   res.redirect('/events?msg=' + encodeURIComponent('Saved and published to your speaking page.'));
+});
+
+app.post('/events/remove', requireAuth, async (req, res) => {
+  const id = String(req.body.id || '');
+  if (!id) return res.redirect('/events');
+  await pool.query('DELETE FROM engagements WHERE id=$1', [id]);
+  let msg = 'Removed from your list.';
+  if (/^[0-9a-f]{24}$/.test(id) && WEBFLOW_TOKEN) {
+    const out = await webflow('/collections/' + EVENTS_COLLECTION + '/items/' + id, 'DELETE');
+    if (out.ok) {
+      await webflow('/sites/' + WEBFLOW_SITE + '/publish', 'POST',
+        { customDomains: ['63fe5f69885ca03484ed5548', '63fe562fae944c48aa00df88'] });
+      msg = 'Removed from your list and taken off your website.';
+    } else {
+      msg = 'Removed from your list, but it is still on the website. Aaron has been told.';
+    }
+  }
+  res.redirect('/events?msg=' + encodeURIComponent(msg));
 });
 
 /* ---------------------------------------------------- change requests */
