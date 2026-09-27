@@ -1591,6 +1591,68 @@ app.post('/import', async (req, res) => {
   res.json({ ok: true, added, skipped, flagged });
 });
 
+// Pulls every historical submission straight from Webflow, pages and all.
+const WEBFLOW_TOKEN = process.env.WEBFLOW_TOKEN || '';
+const WEBFLOW_SITE  = process.env.WEBFLOW_SITE || '62e1efa2754a35fc7aa455a9';
+
+app.post('/import/webflow', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  if (!WEBFLOW_TOKEN) return res.status(400).json({ ok:false, error:'WEBFLOW_TOKEN not set' });
+
+  let offset = 0, added = 0, skipped = 0, flagged = 0, total = null;
+  const limit = 100;
+
+  try {
+    while (true) {
+      const url = 'https://api.webflow.com/v2/sites/' + WEBFLOW_SITE +
+                  '/form_submissions?limit=' + limit + '&offset=' + offset;
+      const r = await fetch(url, { headers: {
+        authorization: 'Bearer ' + WEBFLOW_TOKEN, 'accept-version': '2.0.0' } });
+      if (!r.ok) return res.status(502).json({ ok:false, error:'webflow ' + r.status,
+                                               detail: (await r.text()).slice(0,200) });
+      const d = await r.json();
+      const rows = d.formSubmissions || [];
+      total = (d.pagination && d.pagination.total) || total;
+      if (!rows.length) break;
+
+      for (const sub of rows) {
+        const f = sub.formResponse || {};
+        const dupe = await pool.query(
+          `SELECT 1 FROM leads WHERE raw->>'importId' = $1 LIMIT 1`, [String(sub.id)]);
+        if (dupe.rows.length) { skipped++; continue; }
+
+        const name  = pick(f, ['name','full name','your name','first name']);
+        const message = pick(f, ['message','write about your project','event details','comments','notes']);
+        const t = triage(f, message);
+        const machine = looksMachineGenerated(name);
+        const spam = t.spam || machine;
+        if (spam) flagged++;
+
+        await pool.query(
+          `INSERT INTO leads (received_at,form_name,page_url,name,email,phone,organization,message,
+                              raw,is_spam,spam_reason,status,tag)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [sub.dateSubmitted || new Date().toISOString(),
+           sub.displayName || 'unknown', sub.publishedPath || null, name,
+           pick(f, ['email','email address','e-mail']),
+           pick(f, ['phone','phone number','telephone']),
+           pick(f, ['organization','organisation','company']), message,
+           JSON.stringify({ importId: sub.id, source: 'webflow', fields: f }),
+           spam, t.reason || (machine ? 'machine-generated name' : null),
+           spam ? 'spam' : 'new', inferTag(sub.displayName, message)]);
+        added++;
+      }
+      offset += rows.length;
+      if (total && offset >= total) break;
+      if (offset > 5000) break;   // guard
+    }
+    res.json({ ok: true, total, added, skipped, flagged });
+  } catch (e) {
+    console.error('webflow import failed', e);
+    res.status(500).json({ ok:false, error: String(e).slice(0,200), added, skipped });
+  }
+});
+
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
 
 init().then(() => app.listen(PORT, () => console.log('listening on ' + PORT)))
