@@ -187,7 +187,7 @@ async function buildBrief() {
      r.audience ? 'audience ' + r.audience : null,
      r.urgency === 'high' ? 'urgent' : null,
      r.next_follow_up ? 'follow up ' + new Date(r.next_follow_up).toISOString().slice(0,10) : null
-    ].filter(Boolean).join(' | ')).join('\n');
+    ].filter(Boolean).join(' | ')).join(String.fromCharCode(10));
   const out = await askClaude(BRIEF_SYSTEM,
     'Today is ' + new Date().toISOString().slice(0,10) + '.\nOpen enquiries:\n' + lines, 300);
   return out || null;
@@ -603,7 +603,7 @@ app.get('/login', (req, res) => res.send(layout('Sign in', `
           '  gl_PointSize = customSize * (uScale / -mv.z);',
           '  gl_Position = projectionMatrix * mv;',
           '}'
-        ].join('\n'),
+        ].join(String.fromCharCode(10)),
         fragmentShader: [
           'varying vec3 vColor;',
           'varying float vAlpha;',
@@ -614,7 +614,7 @@ app.get('/login', (req, res) => res.send(layout('Sign in', `
           '  float soft = smoothstep(0.5, 0.06, r);',
           '  gl_FragColor = vec4(vColor, soft * vAlpha);',
           '}'
-        ].join('\n')
+        ].join(String.fromCharCode(10))
       });
 
       var points = new THREE.Points(geo, mat);
@@ -1243,7 +1243,7 @@ app.get('/export', requireAuth, async (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition',
     'attachment; filename="melody-leads-' + new Date().toISOString().slice(0,10) + '.csv"');
-  res.send('\ufeff' + [head.join(','), ...body].join('\n'));
+  res.send('\ufeff' + [head.join(','), ...body].join(String.fromCharCode(10)));
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
