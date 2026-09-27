@@ -65,6 +65,17 @@ CREATE INDEX IF NOT EXISTS leads_follow_idx   ON leads (next_follow_up);
 CREATE INDEX IF NOT EXISTS leads_email_idx    ON leads (email);
 CREATE INDEX IF NOT EXISTS events_lead_idx    ON lead_events (lead_id, at DESC);
 
+CREATE TABLE IF NOT EXISTS engagements (
+  id        TEXT PRIMARY KEY,
+  name      TEXT NOT NULL,
+  starts_at TIMESTAMPTZ,
+  date_label TEXT,
+  location  TEXT,
+  link      TEXT,
+  notes     TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS briefs (
   day   DATE PRIMARY KEY,
   body  TEXT NOT NULL,
@@ -387,6 +398,16 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .stat span{font-size:.68rem;letter-spacing:.11em;text-transform:uppercase;
            color:rgba(255,255,255,.74)}
 
+.diary{background:var(--card);border:1px solid var(--line);border-radius:13px;
+  padding:14px 15px;margin-bottom:14px}
+.diary-label{font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--soft);margin-bottom:10px}
+.diary-row{display:flex;gap:13px;padding:10px 0;border-top:1px solid var(--line)}
+.diary-row:first-of-type{border-top:0;padding-top:0}
+.diary-when{flex:none;min-width:5.6em;font-size:.82rem;font-weight:700;color:var(--due)}
+.diary-name{font-weight:600;font-size:1rem;line-height:1.35}
+.diary-meta{font-size:.86rem;color:var(--soft);margin-top:2px}
+.diary-link{display:inline-block;margin-top:6px;font-size:.82rem;font-weight:600;color:var(--deep)}
 .tabs{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px}
 .tab{white-space:nowrap;padding:12px 18px;border-radius:999px;border:1px solid var(--line);
      background:var(--card);color:var(--mid);text-decoration:none;font-size:.95rem;
@@ -818,6 +839,17 @@ app.get('/', requireAuth, async (req, res) => {
 
   const brief = (!req.query.view && page === 1) ? await todaysBrief() : null;
 
+  let upcoming = [];
+  if (page === 1) {
+    try {
+      const u = await pool.query(
+        `SELECT * FROM engagements
+          WHERE starts_at IS NULL OR starts_at >= now() - interval '12 hours'
+          ORDER BY starts_at ASC NULLS LAST LIMIT 3`);
+      upcoming = u.rows;
+    } catch (e) { console.error('engagements read failed', e); }
+  }
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const due = Number(n.c_due), fresh = Number(n.c_new);
@@ -879,6 +911,22 @@ app.get('/', requireAuth, async (req, res) => {
           <div class="stat"><b data-to="${n.c_booked}">0</b><span>Booked</span></div>
         </div>
       </div>
+      ${upcoming.length ? `<div class="diary">
+        <div class="diary-label">Coming up</div>
+        ${upcoming.map(function(u){
+          var days = u.starts_at
+            ? Math.ceil((new Date(u.starts_at) - Date.now()) / 86400000) : null;
+          var when = days === null ? '' :
+            days <= 0 ? 'Today' : days === 1 ? 'Tomorrow' : 'In ' + days + ' days';
+          return '<div class="diary-row">' +
+            '<div class="diary-when">' + esc(when) + '</div>' +
+            '<div><div class="diary-name">' + esc(u.name) + '</div>' +
+            '<div class="diary-meta">' + esc([u.date_label, u.location].filter(Boolean).join(' \u00b7 ')) + '</div>' +
+            (u.notes ? '<div class="diary-meta">' + esc(u.notes) + '</div>' : '') +
+            (u.link ? '<a class="diary-link" href="' + esc(u.link) + '" target="_blank" rel="noopener">Details</a>' : '') +
+            '</div></div>';
+        }).join('')}
+      </div>` : ''}
       <div class="tabs">${tabs}</div>
       <form class="search" method="get" action="/">
         <input type="hidden" name="view" value="${esc(view)}">
@@ -1281,6 +1329,26 @@ app.get('/export', requireAuth, async (req, res) => {
   res.setHeader('Content-Disposition',
     'attachment; filename="melody-leads-' + new Date().toISOString().slice(0,10) + '.csv"');
   res.send('\ufeff' + [head.join(','), ...body].join(String.fromCharCode(10)));
+});
+
+// Keeps the CRM's engagement list in step with the site's Events collection.
+app.post('/engagements/sync', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  const items = Array.isArray(req.body && req.body.items) ? req.body.items : [];
+  let n = 0;
+  for (const it of items) {
+    if (!it.id || !it.name) continue;
+    await pool.query(
+      `INSERT INTO engagements (id,name,starts_at,date_label,location,link,notes,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+       ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, starts_at=EXCLUDED.starts_at,
+         date_label=EXCLUDED.date_label, location=EXCLUDED.location, link=EXCLUDED.link,
+         notes=EXCLUDED.notes, updated_at=now()`,
+      [it.id, it.name, it.starts_at || null, it.date_label || null,
+       it.location || null, it.link || null, it.notes || null]);
+    n++;
+  }
+  res.json({ ok: true, synced: n });
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
