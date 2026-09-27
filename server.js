@@ -362,6 +362,9 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
      border-radius:50%;background:var(--lav)}
 .timeline .when{font-size:.72rem;color:var(--soft)}
 .timeline .what{font-size:.89rem;color:var(--mid);white-space:pre-wrap}
+footer.credit{text-align:center;padding:26px 16px 34px;font-size:.8rem;color:var(--soft);
+  letter-spacing:.02em}
+footer.credit b{font-weight:600;color:var(--mid)}
 .signin-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;
   padding:24px;background:
     radial-gradient(1100px 520px at 50% -8%, #EDEAF7 0%, rgba(237,234,247,0) 62%),
@@ -406,7 +409,9 @@ textarea:focus,select:focus,input:focus{outline:none;border-color:var(--lav);
 
 const layout = (title, body) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
+<title>${esc(title)}</title><style>${CSS}</style></head><body>${body}
+<footer class="credit">Custom CRM by <b>Activate</b></footer>
+</body></html>`;
 
 /* ---------------------------------------------------------------- login */
 
