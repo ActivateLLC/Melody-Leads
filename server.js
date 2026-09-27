@@ -522,7 +522,21 @@ app.get('/logout', (req, res) => { res.clearCookie('mv_session'); res.redirect('
 /* ----------------------------------------------------------------- list */
 
 app.get('/', requireAuth, async (req, res) => {
-  const view = (req.query.view || 'due').toLowerCase();
+  // Default to whichever view actually has something in it, so she never lands on an empty screen.
+  let defaultView = 'due';
+  if (!req.query.view) {
+    try {
+      const d = await pool.query(`
+        SELECT count(*) FILTER (WHERE NOT is_spam AND status NOT IN ('booked','cold')
+                 AND next_follow_up IS NOT NULL AND next_follow_up <= CURRENT_DATE)::int AS due,
+               count(*) FILTER (WHERE NOT is_spam AND status='new')::int AS fresh,
+               count(*) FILTER (WHERE NOT is_spam)::int AS any
+          FROM leads`);
+      const r = d.rows[0];
+      defaultView = r.due > 0 ? 'due' : (r.fresh > 0 ? 'new' : (r.any > 0 ? 'all' : 'due'));
+    } catch (e) { console.error('default view check failed', e); }
+  }
+  const view = (req.query.view || defaultView).toLowerCase();
   const q = (req.query.q || '').trim();
   const where = [];
   const params = [];
@@ -596,7 +610,7 @@ app.get('/', requireAuth, async (req, res) => {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const brief = (view === 'due' && page === 1) ? await todaysBrief() : null;
+  const brief = (!req.query.view && page === 1) ? await todaysBrief() : null;
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
