@@ -49,6 +49,7 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS event_date TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS audience TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS urgency TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS draft_reply TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS fee NUMERIC(10,2);
 
 CREATE TABLE IF NOT EXISTS lead_events (
   id      SERIAL PRIMARY KEY,
@@ -165,6 +166,9 @@ async function aiClassify(formName, fields, message) {
   catch (e) { console.error('classify parse failed', out.slice(0, 200)); return null; }
 }
 
+const BOOKING_LINK = process.env.BOOKING_LINK ||
+  'https://bookings.cloud.microsoft/bookwithme/user/943ee483881a40259b5b38356efce638%40arisecares.com';
+
 const REPLY_SYSTEM = `You draft email replies as Melody Vachal: keynote speaker, author of
 "Still, I Rise: A Guide to Navigating the Caregiver Journey", speech-language pathologist,
 Master Certified Health and Wellness Coach. She cared for her son for thirty years and was
@@ -173,7 +177,9 @@ Her voice is warm, direct and unfussy. Short paragraphs. No exclamation marks, n
 filler, no "I hope this finds you well". She never overpromises on dates she has not confirmed.
 Write only the body of the email. No subject line, no signature block — she adds her own.
 If the enquiry is about booking her to speak, ask the two questions she always needs:
-the date and the audience. Keep it under 150 words.`;
+the date and the audience, and offer a call using this exact link on its own line:
+${BOOKING_LINK}
+Keep it under 160 words.`;
 
 const BRIEF_SYSTEM = `You write a two or three sentence orientation for Melody Vachal, a
 keynote speaker, before she works through her enquiry queue.
@@ -811,6 +817,8 @@ app.get('/', requireAuth, async (req, res) => {
       count(*) FILTER (WHERE NOT is_spam AND status='new')       AS c_new,
       count(*) FILTER (WHERE NOT is_spam AND status='contacted') AS c_contacted,
       count(*) FILTER (WHERE NOT is_spam AND status='booked')    AS c_booked,
+      COALESCE(sum(fee) FILTER (WHERE NOT is_spam AND status='booked'), 0)::numeric AS v_booked,
+      COALESCE(sum(fee) FILTER (WHERE NOT is_spam AND status NOT IN ('booked','cold','spam')), 0)::numeric AS v_pipeline,
       count(*) FILTER (WHERE is_spam)                            AS c_spam,
       count(*) FILTER (WHERE NOT is_spam)                        AS c_all,
       count(*) FILTER (WHERE NOT is_spam AND status NOT IN ('booked','cold')
@@ -879,6 +887,7 @@ app.get('/', requireAuth, async (req, res) => {
           ${l.is_spam ? `<span class="pill spam">${esc(l.spam_reason || 'spam')}</span>` : ''}
           ${overdue ? `<span class="pill due">follow up</span>` : ''}
           ${l.submissions > 1 ? `<span class="pill">${l.submissions}\u00d7</span>` : ''}
+          ${l.fee != null ? `<span class="pill good">$${Number(l.fee).toLocaleString('en-US',{maximumFractionDigits:0})}</span>` : ''}
         </div>
         <p class="who"><a href="/lead/${l.id}">${esc(l.name || l.email || 'No name')}</a></p>
         <div class="meta">${esc(l.organization || '')}${l.email ? ' &middot; ' + esc(l.email) : ''}</div>
@@ -916,6 +925,8 @@ app.get('/', requireAuth, async (req, res) => {
           <div class="stat"><b data-to="${n.c_due}">0</b><span>Due</span></div>
           <div class="stat"><b data-to="${n.c_new}">0</b><span>New</span></div>
           <div class="stat"><b data-to="${n.c_booked}">0</b><span>Booked</span></div>
+          ${Number(n.v_booked) > 0 || Number(n.v_pipeline) > 0 ? `
+          <div class="stat"><b data-money="${Number(n.v_booked)}">$0</b><span>Booked $</span></div>` : ''}
         </div>
       </div>
       ${upcoming.length ? `<div class="diary">
@@ -967,7 +978,11 @@ app.get('/', requireAuth, async (req, res) => {
     (function(){
       var reduce = window.matchMedia &&
                    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      document.querySelectorAll('.stat b').forEach(function(el){
+      document.querySelectorAll('.stat b[data-money]').forEach(function(el){
+        var v = Number(el.getAttribute('data-money')) || 0;
+        el.textContent = '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+      });
+      document.querySelectorAll('.stat b[data-to]').forEach(function(el){
         var to = parseInt(el.getAttribute('data-to'), 10) || 0;
         if (reduce || to === 0) { el.textContent = to; return; }
         var start = performance.now(), ms = 420;
@@ -1124,6 +1139,8 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
             <select name="tag">${tagOpts}</select>
             <input type="date" name="next_follow_up"
               value="${l.next_follow_up ? new Date(l.next_follow_up).toISOString().slice(0,10) : ''}">
+            <input type="text" name="fee" inputmode="decimal" placeholder="Fee $"
+              value="${l.fee != null ? esc(l.fee) : ''}" style="max-width:9em">
           </div>
           <div class="row"><textarea name="note" placeholder="Add a note"></textarea></div>
           <div class="row"><button class="btn" type="submit">Save</button></div>
@@ -1151,14 +1168,16 @@ app.post('/lead/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).send('bad id');
   const { status, tag, next_follow_up, note } = req.body;
+  const feeRaw = (req.body.fee || '').toString().replace(/[^0-9.]/g, '');
+  const fee = feeRaw ? Number(feeRaw) : null;
   const s = STATUSES.includes(status) ? status : 'new';
 
   const before = await pool.query('SELECT status FROM leads WHERE id=$1', [id]);
 
   await pool.query(
     `UPDATE leads SET status=$1, tag=$2, next_follow_up=NULLIF($3,'')::date,
-       is_spam=($1='spam'), updated_at=now() WHERE id=$4`,
-    [s, TAGS.includes(tag) ? tag : 'general', next_follow_up || '', id]);
+       fee=$4, is_spam=($1='spam'), updated_at=now() WHERE id=$5`,
+    [s, TAGS.includes(tag) ? tag : 'general', next_follow_up || '', fee, id]);
 
   if (before.rows.length && before.rows[0].status !== s)
     await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'status',$2)`,
@@ -1317,7 +1336,7 @@ app.get('/export', requireAuth, async (req, res) => {
   const clause = view === 'spam' ? 'is_spam = true' : 'is_spam = false';
   const { rows } = await pool.query(
     `SELECT received_at,name,email,phone,organization,form_name,tag,status,intent,
-            event_date,audience,urgency,next_follow_up,last_contacted,message
+            event_date,audience,urgency,fee,next_follow_up,last_contacted,message
        FROM leads WHERE ${clause} ORDER BY received_at DESC`);
 
   const cell = v => {
@@ -1326,11 +1345,11 @@ app.get('/export', requireAuth, async (req, res) => {
     return /[",\n]/.test(s) ? '"' + s + '"' : s;
   };
   const head = ['Received','Name','Email','Phone','Organisation','Form','Tag','Status',
-                'Intent','Event date','Audience','Urgency','Next follow-up','Last contacted','Message'];
+                'Intent','Event date','Audience','Urgency','Fee','Next follow-up','Last contacted','Message'];
   const body = rows.map(r => [
     r.received_at ? new Date(r.received_at).toISOString() : '',
     r.name, r.email, r.phone, r.organization, r.form_name, r.tag, r.status, r.intent,
-    r.event_date, r.audience, r.urgency,
+    r.event_date, r.audience, r.urgency, r.fee,
     r.next_follow_up ? new Date(r.next_follow_up).toISOString().slice(0,10) : '',
     r.last_contacted ? new Date(r.last_contacted).toISOString() : '',
     r.message
