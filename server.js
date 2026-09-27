@@ -422,7 +422,7 @@ body.tour-on header{position:static !important}
 .introjs-overlay{z-index:1999997 !important}
 
 .introjs-tooltip{border-radius:16px !important;font-family:inherit !important;
-  max-width:334px !important;background:var(--card) !important;
+  max-width:min(334px, calc(100vw - 28px)) !important;background:var(--card) !important;
   box-shadow:0 28px 56px -28px rgba(36,31,43,.62) !important;border:0 !important}
 .introjs-tooltip-title{font-size:1.12rem !important;font-weight:700 !important;
   color:var(--ink) !important;letter-spacing:-.01em !important;line-height:1.3 !important}
@@ -466,6 +466,17 @@ body.tour-on header{position:static !important}
 
 .tour-link{background:none;border:0;color:#fff;opacity:.9;font-size:.8rem;font-family:inherit;
   text-decoration:underline;cursor:pointer;padding:0}
+
+/* Floating steps: centre with a transform. intro.js uses a negative margin sized
+   from its own width, which our max-width override invalidates. */
+.introjs-tooltip.introjs-floating{
+  left:50% !important;
+  margin-left:0 !important; margin-right:0 !important;
+  transform:translateX(-50%) !important;
+  width:min(334px, calc(100vw - 28px)) !important}
+
+/* Never let an anchored tooltip hang off either edge. */
+.introjs-tooltipReferenceLayer{max-width:100vw !important}
 .brief{margin-top:14px;padding:13px 14px;border-radius:11px;max-height:9.5em;overflow:auto;
   -webkit-overflow-scrolling:touch;
   background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);
