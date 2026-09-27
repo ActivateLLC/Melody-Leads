@@ -1283,6 +1283,16 @@ app.get('/export', requireAuth, async (req, res) => {
   res.send('\ufeff' + [head.join(','), ...body].join(String.fromCharCode(10)));
 });
 
+// TEMPORARY: clears all stored leads. Removed immediately after use.
+app.post('/admin/purge', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  await pool.query('DELETE FROM lead_events');
+  await pool.query('DELETE FROM leads');
+  await pool.query('DELETE FROM briefs');
+  await pool.query('ALTER SEQUENCE leads_id_seq RESTART WITH 1');
+  res.json({ ok: true, purged: true });
+});
+
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
 
 init().then(() => app.listen(PORT, () => console.log('listening on ' + PORT)))
