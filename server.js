@@ -1,28 +1,3 @@
-app.post('/lead/:id/quick', requireAuth, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const to = req.body.to;
-  if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
-
-  const prev = await pool.query('SELECT status, is_spam, name, email FROM leads WHERE id=$1', [id]);
-  if (!prev.rows.length) return res.redirect('/');
-  const was = prev.rows[0].is_spam ? 'spam' : prev.rows[0].status;
-  const who = prev.rows[0].name || prev.rows[0].email || 'That enquiry';
-
-  if (to === 'spam') {
-    await pool.query(`UPDATE leads SET is_spam=true, status='spam',
-      spam_reason='marked by hand', updated_at=now() WHERE id=$1`, [id]);
-  } else {
-    await pool.query(`UPDATE leads SET status=$1, is_spam=false,
-      last_contacted=CASE WHEN $1='contacted' THEN now() ELSE last_contacted END,
-      updated_at=now() WHERE id=$2`, [to, id]);
-  }
-  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'quick',$2)`, [id, to]);
-
-  const p = new URLSearchParams({ view: req.body.back || 'due',
-    done: String(id), act: to, was: was, who: who });
-  res.redirect('/?' + p.toString());
-});
-
 'use strict';
 
 const express = require('express');
@@ -482,7 +457,7 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .toast-acts form{margin:0}
 .toast-btn{border:1px solid #CFE3D6;background:var(--card);color:var(--good);
   border-radius:999px;padding:9px 16px;font-size:.85rem;font-weight:600;font-family:inherit;
-  text-decoration:none;display:inline-block;cursor:pointer;min-height:42px;line-height:24px}
+  text-decoration:none;display:inline-block;cursor:pointer}
 .ask{display:flex;gap:7px;margin-bottom:12px}
 .ask input{flex:1;padding:14px;border:1px solid var(--lav);border-radius:11px;font-size:1rem;
   background:var(--card);min-height:48px;font-family:inherit}
@@ -961,16 +936,14 @@ app.get('/', requireAuth, async (req, res) => {
     ? (due === 1 ? 'One follow-up is due.' : due + ' follow-ups are due.')
     : fresh > 0
       ? (fresh === 1 ? 'One new enquiry to read.' : fresh + ' new enquiries to read.')
-      : (Number(n.c_contacted) > 0 || Number(n.c_all) > 0
-          ? 'Nothing needs you right now.'
-          : 'Nothing has come in yet.');
+      : (Number(n.c_all) > 0 ? 'Nothing needs you right now.' : 'Nothing has come in yet.');
   const subline = due > 0
     ? 'Oldest first, so the ones waiting longest come up top.'
     : fresh > 0
       ? 'Nothing overdue — these came in since you last looked.'
       : (Number(n.c_all) > 0
-          ? 'Everything is either answered, booked or waiting on them. Use the tabs to look back over any of it.'
-          : 'When someone fills in a form on your website, it will appear here.');
+          ? 'Everything is answered, booked or waiting on them. Use the tabs to look back over any of it.'
+          : 'When someone fills in a form on your website, it appears here.');
 
   const items = rows.length ? rows.map(l => {
     const overdue = l.next_follow_up &&
@@ -1011,12 +984,12 @@ app.get('/', requireAuth, async (req, res) => {
         </div>`}
       </div></div>`;
   }).join('') : `<div class="empty">${
-      view === 'due'       ? 'Nothing is due today. Anything you saved for later will appear here on the day.'
-    : view === 'new'       ? 'No unread enquiries. Answered ones are under Contacted.'
-    : view === 'contacted' ? 'Nothing here yet. Enquiries you have replied to will be listed here.'
+      view === 'due'       ? 'Nothing is due today. Anything you saved for later appears here on the day.'
+    : view === 'new'       ? 'No unread enquiries. Ones you have answered are under Contacted.'
+    : view === 'contacted' ? 'Enquiries you have replied to will be listed here.'
     : view === 'booked'    ? 'No confirmed bookings recorded yet.'
     : view === 'spam'      ? 'Nothing has been filed as spam.'
-    : view === 'all'       ? 'No enquiries yet. They will appear here as they come in.'
+    : view === 'all'       ? 'No enquiries yet. They appear here as they come in.'
     : 'Nothing under this heading yet.'}</div>`;
 
   res.send(layout('Leads', `
@@ -1053,30 +1026,27 @@ app.get('/', requireAuth, async (req, res) => {
         }).join('')}
       </div>` : ''}
       ${req.query.done ? (function(){
-        var act = req.query.act || '';
+        var act = String(req.query.act || '');
         var who = esc(req.query.who || 'That enquiry');
-        var id  = parseInt(req.query.done, 10);
-        var label =
-          act === 'contacted' ? 'marked as contacted' :
-          act === 'booked'    ? 'marked as booked' :
-          act === 'cold'      ? 'set aside' :
-          act === 'spam'      ? 'filed as spam' :
-          act === 'new'       ? 'put back in New' :
-          act.indexOf('snoozed-') === 0
-            ? (act === 'snoozed-1' ? 'saved for tomorrow' : 'saved for next week')
-            : 'updated';
-        var moved = act.indexOf('snoozed-') !== 0;
-        return '<div class="toast">' +
-          '<div class="toast-text"><b>' + who + '</b> ' + label + '.' +
-          (moved ? ' Still here \u2014 now under <b>' + esc(act === 'spam' ? 'Spam' :
-             act.charAt(0).toUpperCase() + act.slice(1)) + '</b>.' :
-                   ' It will come back to Due on the day.') + '</div>' +
-          '<div class="toast-acts">' +
-            '<a class="toast-btn" href="/lead/' + id + '">Open it</a>' +
-            (req.query.was ? '<form method="post" action="/lead/' + id + '/undo">' +
-              '<input type="hidden" name="to" value="' + esc(req.query.was) + '">' +
-              '<input type="hidden" name="back" value="' + esc(view) + '">' +
-              '<button class="toast-btn" type="submit">Undo</button></form>' : '') +
+        var lid = parseInt(req.query.done, 10) || 0;
+        var snoozed = act.indexOf('snoozed-') === 0;
+        var days = snoozed ? parseInt(act.split('-')[1], 10) : 0;
+        var label = snoozed ? (days === 1 ? 'saved for tomorrow' : 'saved for ' + days + ' days time')
+          : act === 'contacted' ? 'marked as contacted'
+          : act === 'booked'    ? 'marked as booked'
+          : act === 'cold'      ? 'set aside'
+          : act === 'spam'      ? 'filed as spam'
+          : act === 'new'       ? 'put back in New' : 'updated';
+        var where = snoozed ? ' It comes back to Due on the day.'
+          : ' Still saved \u2014 now under ' + (act === 'spam' ? 'Spam'
+              : act.charAt(0).toUpperCase() + act.slice(1)) + '.';
+        return '<div class="toast"><div class="toast-text"><b>' + who + '</b> ' + label + '.' +
+          where + '</div><div class="toast-acts">' +
+          '<a class="toast-btn" href="/lead/' + lid + '">Open it</a>' +
+          (req.query.was ? '<form method="post" action="/lead/' + lid + '/undo">' +
+            '<input type="hidden" name="to" value="' + esc(req.query.was) + '">' +
+            '<input type="hidden" name="back" value="' + esc(view) + '">' +
+            '<button class="toast-btn" type="submit">Undo</button></form>' : '') +
           '</div></div>';
       })() : ''}
       <form class="ask" method="post" action="/ask">
@@ -1460,17 +1430,20 @@ app.post('/lead/:id/snooze', requireAuth, async (req, res) => {
     [days, id]);
   await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'snooze',$2)`,
     [id, 'follow up in ' + days + ' day' + (days === 1 ? '' : 's')]);
-  const nm = await pool.query('SELECT name,email FROM leads WHERE id=$1', [id]);
-  const who = nm.rows.length ? (nm.rows[0].name || nm.rows[0].email || 'That enquiry') : 'That enquiry';
-  const p = new URLSearchParams({ view: req.body.back || 'due', done: String(id),
-    act: days === 1 ? 'snoozed-1' : 'snoozed-' + days, who: who });
-  res.redirect('/?' + p.toString());
+  const nmQ = await pool.query('SELECT name,email FROM leads WHERE id=$1', [id]);
+  const whoS = nmQ.rows.length ? (nmQ.rows[0].name || nmQ.rows[0].email || 'That enquiry') : 'That enquiry';
+  res.redirect('/?' + new URLSearchParams({ view: req.body.back || 'due',
+    done: String(id), act: 'snoozed-' + days, who: whoS }).toString());
 });
 
 app.post('/lead/:id/quick', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const to = req.body.to;
   if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
+  const prevQ = await pool.query('SELECT status, is_spam, name, email FROM leads WHERE id=$1', [id]);
+  if (!prevQ.rows.length) return res.redirect('/');
+  const was = prevQ.rows[0].is_spam ? 'spam' : prevQ.rows[0].status;
+  const who = prevQ.rows[0].name || prevQ.rows[0].email || 'That enquiry';
   if (to === 'spam') {
     await pool.query(`UPDATE leads SET is_spam=true, status='spam',
       spam_reason='marked by hand', updated_at=now() WHERE id=$1`, [id]);
@@ -1480,7 +1453,8 @@ app.post('/lead/:id/quick', requireAuth, async (req, res) => {
       updated_at=now() WHERE id=$2`, [to, id]);
   }
   await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'quick',$2)`, [id, to]);
-  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
+  res.redirect('/?' + new URLSearchParams({ view: req.body.back || 'due',
+    done: String(id), act: to, was: was, who: who }).toString());
 });
 
 app.post('/brief/refresh', requireAuth, async (req, res) => {
@@ -1540,18 +1514,6 @@ app.post('/engagements/sync', async (req, res) => {
   res.json({ ok: true, synced: n });
 });
 
-app.post('/lead/:id/undo', requireAuth, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const to = req.body.to;
-  if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
-  await pool.query(`UPDATE leads SET status=$1, is_spam=($1='spam'),
-    spam_reason=CASE WHEN $1='spam' THEN spam_reason ELSE NULL END,
-    updated_at=now() WHERE id=$2`, [to, id]);
-  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'undo',$2)`,
-    [id, 'put back to ' + to]);
-  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
-});
-
 app.post('/lead/:id/delete', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).send('bad id');
@@ -1569,6 +1531,16 @@ app.post('/ask', requireAuth, async (req, res) => {
     'I could not answer that from what is in here.');
   if (out && out.view) params.set('focus', out.view);
   res.redirect('/?' + params.toString());
+});
+
+app.post('/lead/:id/undo', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const to = req.body.to;
+  if (!Number.isInteger(id) || !STATUSES.includes(to)) return res.status(400).send('bad request');
+  await pool.query(`UPDATE leads SET status=$1, is_spam=($1='spam'), updated_at=now() WHERE id=$2`, [to, id]);
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'undo',$2)`,
+    [id, 'put back to ' + to]);
+  res.redirect('/?view=' + encodeURIComponent(req.body.back || 'due'));
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
