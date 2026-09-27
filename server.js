@@ -77,6 +77,17 @@ CREATE TABLE IF NOT EXISTS engagements (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS requests (
+  id         SERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  body       TEXT NOT NULL,
+  page       TEXT,
+  urgency    TEXT NOT NULL DEFAULT 'whenever',
+  status     TEXT NOT NULL DEFAULT 'open',
+  reply      TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS briefs (
   day   DATE PRIMARY KEY,
   body  TEXT NOT NULL,
@@ -432,6 +443,7 @@ header h1{margin:0;font-size:1rem;font-weight:600;letter-spacing:.01em;
 .hdr-logo{height:30px;width:auto;display:block;flex:none;
   background:#fff;border-radius:8px;padding:3px 4px}
 header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
+.hdr-nav{display:flex;gap:14px;align-items:center}
 .wrap{max-width:900px;margin:0 auto;padding:16px 14px 80px}
 
 /* Summary */
@@ -993,8 +1005,9 @@ app.get('/', requireAuth, async (req, res) => {
     : 'Nothing under this heading yet.'}</div>`;
 
   res.send(layout('Leads', `
-    <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="">Melody &mdash; leads</h1>
-      <a href="/logout">Sign out</a></header>
+    <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt="">Melody</h1>
+      <span class="hdr-nav"><a href="/events">Events</a><a href="/requests">Requests</a>
+      <a href="/logout">Sign out</a></span></header>
     <div class="wrap">
       <div class="summary">
         <div class="hello">${esc(greeting)}</div>
@@ -1685,6 +1698,188 @@ app.post('/retriage', async (req, res) => {
     }
   }
   res.json({ ok: true, checked: rows.length, moved });
+});
+
+const EVENTS_COLLECTION = process.env.EVENTS_COLLECTION || '6a3549a4ba99226385574192';
+
+async function webflow(path, method, body) {
+  if (!WEBFLOW_TOKEN) return { ok:false, error:'no token' };
+  const r = await fetch('https://api.webflow.com/v2' + path, {
+    method: method || 'GET',
+    headers: { authorization: 'Bearer ' + WEBFLOW_TOKEN,
+               'accept-version': '2.0.0', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await r.text();
+  let data = null; try { data = JSON.parse(text); } catch (e) {}
+  return { ok: r.ok, status: r.status, data, text: text.slice(0, 300) };
+}
+
+/* ------------------------------------------------- her own events page */
+
+app.get('/events', requireAuth, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM engagements ORDER BY starts_at DESC NULLS LAST');
+  const today = new Date().toISOString().slice(0,10);
+  const card = e => {
+    const d = e.starts_at ? new Date(e.starts_at).toISOString().slice(0,10) : '';
+    const past = d && d < today;
+    return `<div class="card">
+      <form method="post" action="/events/save">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <div class="meta">${past ? 'Past' : 'Upcoming'}</div>
+        <div class="row"><input type="text" name="name" value="${esc(e.name)}"
+          placeholder="Event name" style="flex:1;min-width:14em"></div>
+        <div class="row">
+          <input type="date" name="date" value="${d}">
+          <input type="text" name="date_label" value="${esc(e.date_label||'')}"
+            placeholder="How the date should read" style="flex:1;min-width:12em">
+        </div>
+        <div class="row"><input type="text" name="location" value="${esc(e.location||'')}"
+          placeholder="Where" style="flex:1;min-width:14em"></div>
+        <div class="row"><input type="text" name="link" value="${esc(e.link||'')}"
+          placeholder="Link for details" style="flex:1;min-width:14em"></div>
+        <div class="row"><textarea name="notes" placeholder="Notes just for you">${esc(e.notes||'')}</textarea></div>
+        <div class="row">
+          <button class="btn" type="submit">Save</button>
+          <button class="btn ghost" type="submit" formaction="/events/publish">Save &amp; put on my website</button>
+        </div>
+      </form>
+    </div>`;
+  };
+
+  res.send(layout('Events', `
+    <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt=""><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
+      <a href="/logout">Sign out</a></header>
+    <div class="wrap">
+      ${req.query.msg ? `<div class="toast"><div class="toast-text">${esc(req.query.msg)}</div></div>` : ''}
+      <div class="card">
+        <h2>Add an engagement</h2>
+        <p class="lede" style="color:var(--mid);font-size:.95rem">Anything you add here can be put
+          straight onto your speaking page.</p>
+        <form method="post" action="/events/save">
+          <div class="row"><input type="text" name="name" placeholder="Event name" required
+            style="flex:1;min-width:14em"></div>
+          <div class="row">
+            <input type="date" name="date">
+            <input type="text" name="date_label" placeholder="e.g. November 7, 2026 \u00b7 12:00 pm CT"
+              style="flex:1;min-width:12em">
+          </div>
+          <div class="row"><input type="text" name="location" placeholder="Where"
+            style="flex:1;min-width:14em"></div>
+          <div class="row"><input type="text" name="link" placeholder="Link for details"
+            style="flex:1;min-width:14em"></div>
+          <div class="row"><textarea name="notes" placeholder="Notes just for you"></textarea></div>
+          <div class="row">
+            <button class="btn" type="submit">Add</button>
+            <button class="btn ghost" type="submit" formaction="/events/publish">Add &amp; put on my website</button>
+          </div>
+        </form>
+      </div>
+      ${rows.map(card).join('')}
+    </div>`));
+});
+
+async function saveEngagement(b) {
+  const id = b.id && String(b.id).trim() ? String(b.id) : 'local-' + Date.now();
+  const startsAt = b.date ? new Date(b.date + 'T12:00:00Z').toISOString() : null;
+  await pool.query(
+    `INSERT INTO engagements (id,name,starts_at,date_label,location,link,notes,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+     ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, starts_at=EXCLUDED.starts_at,
+       date_label=EXCLUDED.date_label, location=EXCLUDED.location, link=EXCLUDED.link,
+       notes=EXCLUDED.notes, updated_at=now()`,
+    [id, b.name || 'Untitled', startsAt, b.date_label || null,
+     b.location || null, b.link || null, b.notes || null]);
+  return { id, startsAt };
+}
+
+app.post('/events/save', requireAuth, async (req, res) => {
+  await saveEngagement(req.body);
+  res.redirect('/events?msg=' + encodeURIComponent('Saved. It is not on your website yet.'));
+});
+
+app.post('/events/publish', requireAuth, async (req, res) => {
+  const { id, startsAt } = await saveEngagement(req.body);
+  if (!WEBFLOW_TOKEN) return res.redirect('/events?msg=' + encodeURIComponent('Saved here, but the website connection is not set up.'));
+
+  const fieldData = {
+    name: req.body.name || 'Untitled',
+    slug: String(req.body.name || 'event').toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'event',
+    'event-date': startsAt,
+    'date-label': req.body.date_label || null,
+    location: req.body.location || null,
+    'registration-link': req.body.link || null,
+    hide: false
+  };
+
+  let out;
+  if (/^[0-9a-f]{24}$/.test(id)) {
+    out = await webflow('/collections/' + EVENTS_COLLECTION + '/items/' + id, 'PATCH',
+      { fieldData });
+  } else {
+    out = await webflow('/collections/' + EVENTS_COLLECTION + '/items', 'POST',
+      { isDraft: false, fieldData });
+    if (out.ok && out.data && out.data.id) {
+      await pool.query('UPDATE engagements SET id=$1 WHERE id=$2', [out.data.id, id])
+        .catch(() => {});
+    }
+  }
+  if (!out.ok) {
+    console.error('webflow write failed', out.status, out.text);
+    return res.redirect('/events?msg=' + encodeURIComponent('Saved here, but the website did not accept it. Aaron has been told.'));
+  }
+  await webflow('/sites/' + WEBFLOW_SITE + '/publish', 'POST',
+    { customDomains: ['63fe5f69885ca03484ed5548', '63fe562fae944c48aa00df88'] });
+  res.redirect('/events?msg=' + encodeURIComponent('Saved and published to your speaking page.'));
+});
+
+/* ---------------------------------------------------- change requests */
+
+app.get('/requests', requireAuth, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM requests ORDER BY created_at DESC LIMIT 100');
+  res.send(layout('Requests', `
+    <header><h1><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
+      <a href="/logout">Sign out</a></header>
+    <div class="wrap">
+      ${req.query.msg ? `<div class="toast"><div class="toast-text">${esc(req.query.msg)}</div></div>` : ''}
+      <div class="card">
+        <h2>Ask for a change</h2>
+        <p style="color:var(--mid);font-size:.95rem;margin:4px 0 0">
+          Anything about the website that you would rather Aaron handled. It is logged here
+          with the date, so nothing gets lost in a text message.</p>
+        <form method="post" action="/requests">
+          <div class="row"><textarea name="body" required
+            placeholder="What would you like changed?"></textarea></div>
+          <div class="row">
+            <input type="text" name="page" placeholder="Which page? (optional)" style="flex:1;min-width:12em">
+            <select name="urgency">
+              <option value="whenever">Whenever suits</option>
+              <option value="this week">This week</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+          <div class="row"><button class="btn" type="submit">Send it</button></div>
+        </form>
+      </div>
+      ${rows.map(r => `<div class="card">
+        <div class="meta">${new Date(r.created_at).toLocaleDateString('en-US',
+          { month:'short', day:'numeric', year:'numeric' })}
+          &middot; ${esc(r.urgency)} &middot; ${esc(r.status)}${r.page ? ' &middot; ' + esc(r.page) : ''}</div>
+        <div class="msg">${esc(r.body)}</div>
+        ${r.reply ? `<div class="nextstep">${esc(r.reply)}</div>` : ''}
+      </div>`).join('')}
+    </div>`));
+});
+
+app.post('/requests', requireAuth, async (req, res) => {
+  const body = (req.body.body || '').toString().trim();
+  if (!body) return res.redirect('/requests');
+  await pool.query(
+    `INSERT INTO requests (body, page, urgency) VALUES ($1,$2,$3)`,
+    [body.slice(0, 4000), (req.body.page || '').slice(0, 200) || null,
+     ['whenever','this week','urgent'].includes(req.body.urgency) ? req.body.urgency : 'whenever']);
+  res.redirect('/requests?msg=' + encodeURIComponent('Sent. Aaron can see it.'));
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
