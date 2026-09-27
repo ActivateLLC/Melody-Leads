@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS leads (
 );
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT 'general';
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_contacted TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS intent TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS event_date TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS audience TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS urgency TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS draft_reply TEXT;
 
 CREATE TABLE IF NOT EXISTS lead_events (
   id      SERIAL PRIMARY KEY,
@@ -96,6 +101,71 @@ function triage(fields, message) {
 }
 
 const TAGS = ['speaking', 'book', 'guide', 'general'];
+const AI_KEY = process.env.ANTHROPIC_API_KEY || '';
+const AI_MODEL = process.env.AI_MODEL || 'claude-sonnet-4-6';
+
+async function askClaude(system, user, maxTokens) {
+  if (!AI_KEY) return null;
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': AI_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        max_tokens: maxTokens || 700,
+        system: system,
+        messages: [{ role: 'user', content: user }]
+      })
+    });
+    if (!r.ok) { console.error('claude', r.status, await r.text()); return null; }
+    const d = await r.json();
+    return (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  } catch (e) { console.error('claude call failed', e); return null; }
+}
+
+const CLASSIFY_SYSTEM = `You triage enquiries for Melody Vachal, a keynote speaker and author on caregiving.
+Return ONLY a JSON object, no prose, no code fences, with these keys:
+  "tag": one of "speaking","book","guide","general"
+  "is_spam": true or false
+  "spam_reason": short string or null
+  "intent": one short sentence describing what they want
+  "event_date": ISO date string if an event date is mentioned, else null
+  "audience": approximate audience size as a string, else null
+  "organization": organisation name if stated or inferable, else null
+  "urgency": "high","normal" or "low"
+Mark is_spam true only for bulk marketing, SEO/backlink offers, or obvious bot submissions.
+A short or blunt genuine enquiry is NOT spam.`;
+
+async function aiClassify(formName, fields, message) {
+  const out = await askClaude(CLASSIFY_SYSTEM,
+    'Form: ' + formName + '\nFields: ' + JSON.stringify(fields).slice(0, 2500), 500);
+  if (!out) return null;
+  try { return JSON.parse(out.replace(/```json|```/g, '').trim()); }
+  catch (e) { console.error('classify parse failed', out.slice(0, 200)); return null; }
+}
+
+const REPLY_SYSTEM = `You draft email replies as Melody Vachal: keynote speaker, author of
+"Still, I Rise: A Guide to Navigating the Caregiver Journey", speech-language pathologist,
+Master Certified Health and Wellness Coach. She cared for her son for thirty years and was
+herself a care recipient after an accident.
+Her voice is warm, direct and unfussy. Short paragraphs. No exclamation marks, no corporate
+filler, no "I hope this finds you well". She never overpromises on dates she has not confirmed.
+Write only the body of the email. No subject line, no signature block — she adds her own.
+If the enquiry is about booking her to speak, ask the two questions she always needs:
+the date and the audience. Keep it under 150 words.`;
+
+async function aiDraftReply(lead) {
+  return askClaude(REPLY_SYSTEM,
+    'Reply to this enquiry.\n\nFrom: ' + (lead.name || 'unknown') +
+    (lead.organization ? ' at ' + lead.organization : '') +
+    '\nForm: ' + (lead.form_name || 'contact') +
+    '\nMessage: ' + (lead.message || '(no message)'), 600);
+}
+
 
 function inferTag(formName, message) {
   const f = (formName || '').toLowerCase();
@@ -125,25 +195,58 @@ app.post('/hook', async (req, res) => {
     const fields = payload.data || payload.fields || {};
     const formName = payload.name || payload.formName || 'unknown';
     const message = pick(fields, ['message','write about your project','event details','comments','notes']);
-    const t = triage(fields, message);
-    const tag = inferTag(formName, message);
+
+    // Honeypot is decided locally and is never overridden by the model.
+    const hp = (fields.Website || fields.website || '').toString().trim();
+
+    let spam, reason, tag, intent = null, eventDate = null, audience = null, urgency = null;
+    const ai = hp ? null : await aiClassify(formName, fields, message);
+
+    if (ai) {
+      spam = hp ? true : !!ai.is_spam;
+      reason = hp ? 'honeypot filled' : (ai.spam_reason || null);
+      tag = TAGS.includes(ai.tag) ? ai.tag : inferTag(formName, message);
+      intent = ai.intent || null;
+      eventDate = ai.event_date || null;
+      audience = ai.audience || null;
+      urgency = ['high','normal','low'].includes(ai.urgency) ? ai.urgency : 'normal';
+    } else {
+      const t = triage(fields, message);
+      spam = t.spam; reason = t.reason;
+      tag = inferTag(formName, message);
+      urgency = 'normal';
+    }
+
+    const org = pick(fields, ['organization','organisation','company'])
+             || (ai && ai.organization) || null;
 
     const r = await pool.query(
       `INSERT INTO leads (form_name,page_url,name,email,phone,organization,message,raw,
-                          is_spam,spam_reason,status,tag)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+                          is_spam,spam_reason,status,tag,intent,event_date,audience,urgency)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
       [formName, payload.pageUrl || null,
        pick(fields, ['name','full name','your name','first name']),
        pick(fields, ['email','email address','e-mail']),
        pick(fields, ['phone','phone number','telephone']),
-       pick(fields, ['organization','organisation','company']),
-       message, JSON.stringify(payload), t.spam, t.reason,
-       t.spam ? 'spam' : 'new', tag]
+       org, message, JSON.stringify(payload), spam, reason,
+       spam ? 'spam' : 'new', tag, intent, eventDate, audience, urgency]
     );
+    const id = r.rows[0].id;
     await pool.query(
       `INSERT INTO lead_events (lead_id, kind, body) VALUES ($1,'received',$2)`,
-      [r.rows[0].id, 'via ' + formName]);
-    res.json({ ok: true, id: r.rows[0].id, spam: t.spam, tag });
+      [id, 'via ' + formName + (ai ? ' \u00b7 classified by AI' : '')]);
+
+    // Draft a reply up front for genuine enquiries, so it is waiting when she opens it.
+    if (!spam && AI_KEY) {
+      const lead = { name: pick(fields, ['name','full name']), organization: org,
+                     form_name: formName, message };
+      aiDraftReply(lead).then(draft => {
+        if (draft) pool.query('UPDATE leads SET draft_reply=$1 WHERE id=$2', [draft, id])
+          .catch(e => console.error('draft save failed', e));
+      });
+    }
+
+    res.json({ ok: true, id, spam, tag, ai: !!ai });
   } catch (e) {
     console.error('ingest failed', e);
     res.status(500).json({ ok: false });
@@ -490,6 +593,8 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
         <div class="meta">Received ${new Date(l.received_at).toLocaleString('en-US',
           { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
           via ${esc(l.form_name || 'form')}</div>
+        ${l.intent ? `<div class="meta" style="margin-top:6px"><span class="pill">${esc(l.urgency || 'normal')}</span> ${esc(l.intent)}</div>` : ''}
+        ${(l.event_date || l.audience) ? `<div class="meta">${l.event_date ? 'Date mentioned: ' + esc(l.event_date) : ''}${(l.event_date && l.audience) ? ' &middot; ' : ''}${l.audience ? 'Audience: ' + esc(l.audience) : ''}</div>` : ''}
         ${l.message ? `<div class="msg">${esc(l.message)}</div>` : ''}
         <div class="row">
           ${l.email ? `<a class="btn" href="mailto:${esc(l.email)}">Email</a>` : ''}
@@ -501,6 +606,20 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
         ${l.last_contacted ? `<div class="meta" style="margin-top:8px">Last contacted
           ${new Date(l.last_contacted).toLocaleDateString('en-US',
             { month: 'short', day: 'numeric' })}</div>` : ''}
+      </div>
+
+      <div class="card">
+        <div class="meta">Suggested reply${l.draft_reply ? '' : ' &mdash; none yet'}</div>
+        ${l.draft_reply
+          ? `<div class="msg" id="draft">${esc(l.draft_reply)}</div>
+             <div class="row">
+               <a class="btn" href="mailto:${esc(l.email || '')}?body=${encodeURIComponent(l.draft_reply)}">Open in email</a>
+               <button class="btn ghost" type="button" onclick="navigator.clipboard.writeText(document.getElementById('draft').innerText);this.textContent='Copied'">Copy</button>
+             </div>`
+          : ''}
+        <form method="post" action="/lead/${l.id}/draft" class="row">
+          <button class="btn ghost" type="submit">${l.draft_reply ? 'Rewrite' : 'Draft a reply'}</button>
+        </form>
       </div>
 
       <div class="card">
@@ -595,7 +714,40 @@ app.post('/bulk', requireAuth, async (req, res) => {
   res.redirect('/?view=' + encodeURIComponent(back));
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.post('/lead/:id/draft', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+  const { rows } = await pool.query('SELECT * FROM leads WHERE id=$1', [id]);
+  if (!rows.length) return res.status(404).send('not found');
+  const draft = await aiDraftReply(rows[0]);
+  if (draft) {
+    await pool.query('UPDATE leads SET draft_reply=$1 WHERE id=$2', [draft, id]);
+    await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'draft','reply drafted')`, [id]);
+  }
+  res.redirect('/lead/' + id);
+});
+
+// Nudge sweep: anything contacted 5+ days ago with no follow-up date gets one set for today,
+// so it surfaces in Due rather than going quiet.
+async function nudgeSweep() {
+  try {
+    const r = await pool.query(`
+      UPDATE leads SET next_follow_up = CURRENT_DATE, updated_at = now()
+      WHERE is_spam = false AND status = 'contacted'
+        AND next_follow_up IS NULL
+        AND last_contacted IS NOT NULL
+        AND last_contacted < now() - interval '5 days'
+      RETURNING id`);
+    for (const row of r.rows)
+      await pool.query(`INSERT INTO lead_events (lead_id,kind,body)
+                        VALUES ($1,'nudge','no reply in 5 days - surfaced for follow-up')`, [row.id]);
+    if (r.rows.length) console.log('nudged', r.rows.length);
+  } catch (e) { console.error('nudge sweep failed', e); }
+}
+setInterval(nudgeSweep, 6 * 60 * 60 * 1000);
+setTimeout(nudgeSweep, 60 * 1000);
+
+app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
 
 init().then(() => app.listen(PORT, () => console.log('listening on ' + PORT)))
       .catch(e => { console.error('startup failed', e); process.exit(1); });
