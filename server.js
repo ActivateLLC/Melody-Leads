@@ -7,6 +7,9 @@ const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 5 } });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -110,6 +113,16 @@ CREATE TABLE IF NOT EXISTS requests (
   reply      TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS request_files (
+  id         SERIAL PRIMARY KEY,
+  request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+  filename   TEXT NOT NULL,
+  mime       TEXT NOT NULL,
+  bytes      BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS request_files_idx ON request_files (request_id);
 
 CREATE TABLE IF NOT EXISTS briefs (
   day   TEXT PRIMARY KEY,
@@ -468,6 +481,7 @@ app.post('/hook', async (req, res) => {
       });
     }
 
+    if (!spam) alertNewEnquiry(id);
     res.json({ ok: true, id, spam, tag, ai: !!ai });
   } catch (e) {
     console.error('ingest failed', e);
@@ -529,6 +543,13 @@ header a{color:#fff;opacity:.88;text-decoration:none;font-size:.8rem}
 .stat span{font-size:.68rem;letter-spacing:.11em;text-transform:uppercase;
            color:rgba(255,255,255,.74)}
 
+.uplabel{font-size:.82rem;font-weight:600;color:var(--mid);margin-bottom:7px}
+.upfile{width:100%;padding:13px;border:1px dashed var(--lav);border-radius:11px;
+  background:var(--paper);font-family:inherit;font-size:.92rem}
+.uphint{font-size:.82rem;color:var(--soft);margin-top:7px;line-height:1.45}
+.shots{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px}
+.shots img{width:104px;height:104px;object-fit:cover;border-radius:10px;
+  border:1px solid var(--line);display:block}
 .toast{background:var(--good-bg);border:1px solid #CFE3D6;border-radius:13px;
   padding:13px 15px;margin-bottom:13px}
 .toast-text{font-size:.95rem;line-height:1.5;color:var(--ink)}
@@ -1285,6 +1306,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       case 'undo':       return { icon: '\u21A9', line: 'Undone \u2014 ' + b };
       case 'sent':       return { icon: '\u2709', line: 'You sent a reply ' + b };
       case 'inbound':    return { icon: '\u21A9', line: b };
+      case 'alert':      return { icon: '\u2022', line: b };
       case 'contacted':  return { icon: '\u2192', line: 'You marked this as contacted' };
       case 'status':     return { icon: '\u21BB', line: 'Status changed: ' + b };
       case 'note':       return { icon: '\u201C', line: b };
@@ -1969,6 +1991,11 @@ app.post('/events/remove', requireAuth, async (req, res) => {
 
 app.get('/requests', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM requests ORDER BY created_at DESC LIMIT 100');
+  const fileRows = await pool.query(
+    `SELECT id, request_id, filename FROM request_files
+      WHERE request_id = ANY($1) ORDER BY id`, [rows.map(r => r.id)]);
+  const filesBy = {};
+  for (const f of fileRows.rows) (filesBy[f.request_id] ||= []).push(f);
   res.send(layout('Requests', `
     <header><h1><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
       <a href="/logout">Sign out</a></header>
@@ -1979,9 +2006,15 @@ app.get('/requests', requireAuth, async (req, res) => {
         <p style="color:var(--mid);font-size:.95rem;margin:4px 0 0">
           Anything about the website that you would rather Aaron handled. It is logged here
           with the date, so nothing gets lost in a text message.</p>
-        <form method="post" action="/requests">
+        <form method="post" action="/requests" enctype="multipart/form-data">
           <div class="row"><textarea name="body" required
             placeholder="What would you like changed?"></textarea></div>
+          <div class="row" style="flex-direction:column;align-items:stretch">
+            <label class="uplabel" for="photos">Add photos or a screenshot (optional)</label>
+            <input id="photos" type="file" name="photos" accept="image/*" multiple
+              capture="environment" class="upfile">
+            <div class="uphint">Up to five, 8&nbsp;MB each. A screenshot of the bit you mean is often quickest.</div>
+          </div>
           <div class="row">
             <input type="text" name="page" placeholder="Which page? (optional)" style="flex:1;min-width:12em">
             <select name="urgency">
@@ -1998,19 +2031,43 @@ app.get('/requests', requireAuth, async (req, res) => {
           { month:'short', day:'numeric', year:'numeric' })}
           &middot; ${esc(r.urgency)} &middot; ${esc(r.status)}${r.page ? ' &middot; ' + esc(r.page) : ''}</div>
         <div class="msg">${esc(r.body)}</div>
+        ${(filesBy[r.id] || []).length ? `<div class="shots">${(filesBy[r.id] || []).map(f =>
+          `<a href="/requests/file/${f.id}" target="_blank" rel="noopener">
+             <img src="/requests/file/${f.id}" alt="${esc(f.filename)}" loading="lazy"></a>`).join('')}</div>` : ''}
         ${r.reply ? `<div class="nextstep">${esc(r.reply)}</div>` : ''}
       </div>`).join('')}
     </div>`));
 });
 
-app.post('/requests', requireAuth, async (req, res) => {
+app.post('/requests', requireAuth, upload.array('photos', 5), async (req, res) => {
   const body = (req.body.body || '').toString().trim();
   if (!body) return res.redirect('/requests');
-  await pool.query(
-    `INSERT INTO requests (body, page, urgency) VALUES ($1,$2,$3)`,
+  const r = await pool.query(
+    `INSERT INTO requests (body, page, urgency) VALUES ($1,$2,$3) RETURNING id`,
     [body.slice(0, 4000), (req.body.page || '').slice(0, 200) || null,
      ['whenever','this week','urgent'].includes(req.body.urgency) ? req.body.urgency : 'whenever']);
-  res.redirect('/requests?msg=' + encodeURIComponent('Sent. Aaron can see it.'));
+  const id = r.rows[0].id;
+
+  let saved = 0;
+  for (const f of (req.files || [])) {
+    if (!/^image\//.test(f.mimetype)) continue;      // images only
+    await pool.query(
+      `INSERT INTO request_files (request_id, filename, mime, bytes) VALUES ($1,$2,$3,$4)`,
+      [id, String(f.originalname || 'photo').slice(0, 200), f.mimetype, f.buffer]);
+    saved++;
+  }
+  res.redirect('/requests?msg=' + encodeURIComponent(
+    'Sent. Aaron can see it' + (saved ? ' along with ' + saved + ' photo' + (saved > 1 ? 's' : '') : '') + '.'));
+});
+
+app.get('/requests/file/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+  const { rows } = await pool.query('SELECT * FROM request_files WHERE id=$1', [id]);
+  if (!rows.length) return res.status(404).send('not found');
+  res.setHeader('Content-Type', rows[0].mime);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.send(rows[0].bytes);
 });
 
 /* ------------------------------------------------------- sending mail */
@@ -2034,6 +2091,47 @@ function mailer() {
     });
   }
   return transport;
+}
+
+const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || process.env.REPLY_TO || SMTP_USER;
+
+// Tell her when something real arrives. Never for spam.
+async function alertNewEnquiry(leadId) {
+  if (!canSend() || !NOTIFY_EMAIL) return;
+  try {
+    const { rows } = await pool.query('SELECT * FROM leads WHERE id=$1', [leadId]);
+    if (!rows.length) return;
+    const l = rows[0];
+    if (l.is_spam) return;
+
+    const bits = [
+      l.name ? 'From: ' + l.name : null,
+      l.organization ? 'Organisation: ' + l.organization : null,
+      l.email ? 'Email: ' + l.email : null,
+      l.event_date ? 'Date mentioned: ' + l.event_date : null,
+      l.audience ? 'Audience: ' + l.audience : null,
+      l.intent ? '\nWhat they want: ' + l.intent : null
+    ].filter(Boolean).join('\n');
+
+    const body = [
+      'A new enquiry just came in' + (l.source === 'email' ? ' by email.' : ' through your website.'),
+      '', bits, '',
+      l.message ? 'Their message:\n' + String(l.message).slice(0, 1200) : '',
+      '', 'Open it: https://leads.melodyvachal.com/lead/' + l.id,
+      '', 'A reply is being drafted for you there. Nothing sends on its own.'
+    ].join('\n');
+
+    await mailer().sendMail({
+      from: '"Melody \u2014 enquiries" <' + FROM_EMAIL + '>',
+      to: NOTIFY_EMAIL,
+      replyTo: l.email || FROM_EMAIL,
+      subject: 'New enquiry' + (l.name ? ' from ' + l.name : '') +
+               (l.tag === 'speaking' ? ' (speaking)' : ''),
+      text: body
+    });
+    await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'alert',$2)`,
+      [l.id, 'you were emailed about this']);
+  } catch (e) { console.error('alert failed', e.message); }
 }
 
 app.post('/lead/:id/send', requireAuth, async (req, res) => {
@@ -2217,6 +2315,7 @@ async function readInbox() {
         await pool.query(
           `INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'received',$2)`,
           [leadId, 'by email \u2014 ' + subject]);
+        alertNewEnquiry(leadId);
         added++;
       }
     } finally { lock.release(); }
