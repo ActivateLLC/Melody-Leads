@@ -4,6 +4,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const { Pool } = require('pg');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -77,6 +78,17 @@ CREATE TABLE IF NOT EXISTS engagements (
   notes     TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS messages (
+  id         SERIAL PRIMARY KEY,
+  lead_id    INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+  sent_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  to_email   TEXT NOT NULL,
+  subject    TEXT,
+  body       TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'reply'
+);
+CREATE INDEX IF NOT EXISTS messages_lead_idx ON messages (lead_id, sent_at DESC);
 
 CREATE TABLE IF NOT EXISTS requests (
   id         SERIAL PRIMARY KEY,
@@ -1167,6 +1179,8 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
 
   const ev = await pool.query(
     'SELECT * FROM lead_events WHERE lead_id=$1 ORDER BY at DESC LIMIT 100', [id]);
+  const sent = await pool.query(
+    'SELECT * FROM messages WHERE lead_id=$1 ORDER BY sent_at DESC LIMIT 20', [id]);
 
   const also = l.email
     ? await pool.query(
@@ -1216,6 +1230,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       case 'draft':      return { icon: '\u270E', line: b ? b.charAt(0).toUpperCase() + b.slice(1) : 'A reply was drafted for you to review' };
       case 'revise':     return { icon: '\u2726', line: 'Draft ' + b };
       case 'undo':       return { icon: '\u21A9', line: 'Undone \u2014 ' + b };
+      case 'sent':       return { icon: '\u2709', line: 'You sent a reply ' + b };
       case 'contacted':  return { icon: '\u2192', line: 'You marked this as contacted' };
       case 'status':     return { icon: '\u21BB', line: 'Status changed: ' + b };
       case 'note':       return { icon: '\u201C', line: b };
@@ -1239,6 +1254,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
     <header><h1><img class="hdr-logo" src="https://cdn.prod.website-files.com/62e1efa2754a35fc7aa455a9/67185ab06bdef51e5ff2b7ab_3-Color%20MV%20Bird.png" alt=""><a href="/" style="color:#fff;text-decoration:none">&larr; Leads</a></h1>
       <a href="/logout">Sign out</a></header>
     <div class="wrap">
+      ${req.query.msg ? `<div class="toast"><div class="toast-text">${esc(req.query.msg)}</div></div>` : ''}
       <div class="card">
         <h2>${esc(l.name || 'No name given')}</h2>
         <div class="meta">${esc(l.organization || '')}</div>
@@ -1272,6 +1288,8 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
 
         ${l.draft_reply ? `
         <form method="post" action="/lead/${l.id}/draft-save">
+          <div class="row"><input type="text" name="subject" style="flex:1;min-width:14em"
+            value="Re: your enquiry" placeholder="Subject"></div>
           <textarea name="draft" id="draft" class="draft-box" spellcheck="true"
             autocapitalize="sentences" autocorrect="on">${esc(l.draft_reply)}</textarea>
           <div class="revise-label">Revise</div>
@@ -1282,7 +1300,9 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
             <button class="chip" type="submit" formaction="/lead/${l.id}/revise" name="mode" value="grammar">Fix spelling</button>
           </div>
           <div class="row">
-            <button class="btn" type="submit">Save draft</button>
+            <button class="btn" type="submit" formaction="/lead/${l.id}/send"
+              onclick="return confirm('Send this to ${esc(l.email || 'them')}?')">Send it</button>
+            <button class="btn ghost" type="submit">Save draft</button>
             <a class="btn ghost" href="mailto:${esc(l.email || '')}?subject=${encodeURIComponent('Re: your enquiry')}&body=${encodeURIComponent(l.draft_reply)}">Open in email</a>
             <button class="btn ghost" type="button"
               onclick="navigator.clipboard.writeText(document.getElementById('draft').value);this.textContent='Copied'">Copy</button>
@@ -1311,6 +1331,16 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
           ${new Date(o.received_at).toLocaleDateString('en-US',
             { month: 'short', day: 'numeric', year: 'numeric' })}
           &middot; ${esc(o.form_name || 'form')}</a></div>`).join('')}
+      </div>` : ''}
+
+      ${sent.rows.length ? `<div class="card">
+        <div class="meta">What you have sent</div>
+        ${sent.rows.map(m => `<div style="padding:11px 0;border-top:1px solid var(--line)">
+          <div class="meta">${new Date(m.sent_at).toLocaleString('en-US',
+            { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
+            &middot; ${esc(m.kind)} &middot; to ${esc(m.to_email)}</div>
+          <div class="msg" style="margin-top:6px">${esc(m.body)}</div>
+        </div>`).join('')}
       </div>` : ''}
 
       <div class="card">
@@ -1921,6 +1951,77 @@ app.post('/requests', requireAuth, async (req, res) => {
     [body.slice(0, 4000), (req.body.page || '').slice(0, 200) || null,
      ['whenever','this week','urgent'].includes(req.body.urgency) ? req.body.urgency : 'whenever']);
   res.redirect('/requests?msg=' + encodeURIComponent('Sent. Aaron can see it.'));
+});
+
+/* ------------------------------------------------------- sending mail */
+
+const SMTP_USER = process.env.SMTP_USER || '';
+const SMTP_PASS = process.env.SMTP_PASS || '';
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const FROM_NAME = process.env.FROM_NAME || 'Melody Vachal';
+const FROM_EMAIL = process.env.FROM_EMAIL || SMTP_USER;
+const REPLY_TO  = process.env.REPLY_TO || FROM_EMAIL;
+const canSend = () => !!(SMTP_USER && SMTP_PASS);
+
+let transport = null;
+function mailer() {
+  if (!canSend()) return null;
+  if (!transport) {
+    transport = nodemailer.createTransport({
+      host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS }
+    });
+  }
+  return transport;
+}
+
+app.post('/lead/:id/send', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).send('bad id');
+
+  const body = (req.body.draft || '').toString().trim();
+  const subject = (req.body.subject || '').toString().trim() || 'Re: your enquiry';
+
+  // Whatever she typed is kept first, whether or not the send succeeds.
+  if (body) await pool.query('UPDATE leads SET draft_reply=$1 WHERE id=$2', [body, id]);
+
+  const { rows } = await pool.query('SELECT * FROM leads WHERE id=$1', [id]);
+  if (!rows.length) return res.status(404).send('not found');
+  const lead = rows[0];
+
+  if (!lead.email) return res.redirect('/lead/' + id + '?msg=' +
+    encodeURIComponent('There is no email address on this enquiry.'));
+  if (!body) return res.redirect('/lead/' + id + '?msg=' +
+    encodeURIComponent('Write something first.'));
+  if (!canSend()) return res.redirect('/lead/' + id + '?msg=' +
+    encodeURIComponent('Sending is not switched on yet. Use Open in email for now.'));
+
+  try {
+    await mailer().sendMail({
+      from: '"' + FROM_NAME + '" <' + FROM_EMAIL + '>',
+      replyTo: REPLY_TO,
+      to: lead.email,
+      subject: subject,
+      text: body
+    });
+  } catch (e) {
+    console.error('send failed', e.message);
+    return res.redirect('/lead/' + id + '?msg=' +
+      encodeURIComponent('That did not send. Your draft is saved. ' + String(e.message).slice(0, 90)));
+  }
+
+  await pool.query(
+    `INSERT INTO messages (lead_id,to_email,subject,body,kind) VALUES ($1,$2,$3,$4,$5)`,
+    [id, lead.email, subject, body, lead.last_contacted ? 'follow-up' : 'reply']);
+  await pool.query(
+    `UPDATE leads SET last_contacted=now(),
+       status=CASE WHEN status='new' THEN 'contacted' ELSE status END,
+       updated_at=now() WHERE id=$1`, [id]);
+  await pool.query(`INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'sent',$2)`,
+    [id, 'to ' + lead.email]);
+
+  res.redirect('/lead/' + id + '?msg=' + encodeURIComponent('Sent to ' + lead.email + '.'));
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
