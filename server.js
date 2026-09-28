@@ -5,6 +5,8 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
+const { ImapFlow } = require('imapflow');
+const { simpleParser } = require('mailparser');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -91,6 +93,12 @@ CREATE TABLE IF NOT EXISTS messages (
   kind       TEXT NOT NULL DEFAULT 'reply'
 );
 CREATE INDEX IF NOT EXISTS messages_lead_idx ON messages (lead_id, sent_at DESC);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'out';
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_id TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS from_email TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS messages_msgid_idx ON messages (message_id)
+  WHERE message_id IS NOT NULL;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'form';
 
 CREATE TABLE IF NOT EXISTS requests (
   id         SERIAL PRIMARY KEY,
@@ -1045,6 +1053,7 @@ app.get('/', requireAuth, async (req, res) => {
         <div class="meta">
           <span>${esc(when)}</span>
           <span class="pill">${esc(l.tag)}</span>
+          ${l.source === 'email' ? '<span class="pill">by email</span>' : ''}
           ${l.is_spam ? `<span class="pill spam">${esc(l.spam_reason || 'spam')}</span>` : ''}
           ${overdue ? `<span class="pill due">follow up</span>` : ''}
           ${l.submissions > 1 ? `<span class="pill">${l.submissions}\u00d7</span>` : ''}
@@ -1275,6 +1284,7 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       case 'revise':     return { icon: '\u2726', line: 'Draft ' + b };
       case 'undo':       return { icon: '\u21A9', line: 'Undone \u2014 ' + b };
       case 'sent':       return { icon: '\u2709', line: 'You sent a reply ' + b };
+      case 'inbound':    return { icon: '\u21A9', line: b };
       case 'contacted':  return { icon: '\u2192', line: 'You marked this as contacted' };
       case 'status':     return { icon: '\u21BB', line: 'Status changed: ' + b };
       case 'note':       return { icon: '\u201C', line: b };
@@ -1378,11 +1388,13 @@ app.get('/lead/:id', requireAuth, async (req, res) => {
       </div>` : ''}
 
       ${sent.rows.length ? `<div class="card">
-        <div class="meta">What you have sent</div>
+        <div class="meta">The conversation</div>
         ${sent.rows.map(m => `<div style="padding:11px 0;border-top:1px solid var(--line)">
           <div class="meta">${new Date(m.sent_at).toLocaleString('en-US',
             { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
-            &middot; ${esc(m.kind)} &middot; to ${esc(m.to_email)}</div>
+            &middot; ${m.direction === 'in' ? 'from ' + esc(m.from_email || '')
+                                            : 'you \u2192 ' + esc(m.to_email)}
+            ${m.subject ? '&middot; ' + esc(m.subject) : ''}</div>
           <div class="msg" style="margin-top:6px">${esc(m.body)}</div>
         </div>`).join('')}
       </div>` : ''}
@@ -2097,7 +2109,140 @@ app.post('/reparse', async (req, res) => {
   res.json({ ok: true, checked: rows.length, fixed });
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
+/* ------------------------------------------------- reading her inbox */
+
+const IMAP_USER = process.env.IMAP_USER || SMTP_USER;
+const IMAP_PASS = process.env.IMAP_PASS || SMTP_PASS;
+const IMAP_HOST = process.env.IMAP_HOST || 'imap.gmail.com';
+const IMAP_PORT = Number(process.env.IMAP_PORT || 993);
+const INBOX_DAYS = Number(process.env.INBOX_DAYS || 30);
+const canRead = () => !!(IMAP_USER && IMAP_PASS);
+
+// Mail that is plainly not an enquiry. Cheap check before spending a model call.
+const NOT_AN_ENQUIRY = /(no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?@|newsletter|unsubscribe@|calendar-notification|bounce)/i;
+
+const ENQUIRY_SYSTEM = `You decide whether an email is a genuine enquiry for Melody Vachal,
+a keynote speaker and author on caregiving, that she would want in her enquiries list.
+
+Enquiries include: speaking or booking requests, media and podcast invitations, questions
+about her book or her work, and follow-ups on any of those.
+
+Not enquiries: newsletters, marketing, receipts, calendar notifications, automated alerts,
+social media notices, personal admin, and anything from a no-reply address.
+
+Return ONLY JSON: {"is_enquiry": true|false, "tag": "speaking"|"book"|"guide"|"general",
+"intent": "one short sentence", "organization": string or null,
+"event_date": ISO date or null, "audience": string or null,
+"urgency": "high"|"normal"|"low"}`;
+
+async function classifyEmail(from, subject, body) {
+  const out = await askClaude(ENQUIRY_SYSTEM,
+    'From: ' + from + '\nSubject: ' + subject + '\n\n' + String(body || '').slice(0, 3000), 400);
+  if (!out) return null;
+  try { return JSON.parse(out.replace(/```json|```/g, '').trim()); } catch (e) { return null; }
+}
+
+async function readInbox() {
+  if (!canRead()) return { ok:false, error:'no mailbox credentials' };
+  const client = new ImapFlow({
+    host: IMAP_HOST, port: IMAP_PORT, secure: true,
+    auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false
+  });
+  let seen = 0, added = 0, threaded = 0, skipped = 0;
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const since = new Date(Date.now() - INBOX_DAYS * 86400000);
+      for await (const msg of client.fetch({ since }, { source: true, envelope: true })) {
+        seen++;
+        const parsed = await simpleParser(msg.source);
+        const messageId = parsed.messageId || null;
+        const from = (parsed.from && parsed.from.value && parsed.from.value[0]) || {};
+        const fromEmail = (from.address || '').toLowerCase();
+        const fromName = from.name || null;
+        const subject = parsed.subject || '(no subject)';
+        const body = (parsed.text || '').trim();
+
+        if (!fromEmail) { skipped++; continue; }
+        if (fromEmail === String(IMAP_USER).toLowerCase()) { skipped++; continue; }
+        if (NOT_AN_ENQUIRY.test(fromEmail) || NOT_AN_ENQUIRY.test(subject)) { skipped++; continue; }
+
+        if (messageId) {
+          const dupe = await pool.query('SELECT 1 FROM messages WHERE message_id=$1', [messageId]);
+          if (dupe.rows.length) { skipped++; continue; }
+        }
+
+        // Already talking to this person? Thread it onto their record.
+        const existing = await pool.query(
+          'SELECT id FROM leads WHERE lower(email)=$1 ORDER BY received_at DESC LIMIT 1',
+          [fromEmail]);
+
+        if (existing.rows.length) {
+          const leadId = existing.rows[0].id;
+          await pool.query(
+            `INSERT INTO messages (lead_id,sent_at,to_email,from_email,subject,body,kind,direction,message_id)
+             VALUES ($1,$2,$3,$4,$5,$6,'reply','in',$7)
+             ON CONFLICT (message_id) DO NOTHING`,
+            [leadId, parsed.date || new Date(), IMAP_USER, fromEmail, subject, body, messageId]);
+          await pool.query(
+            `UPDATE leads SET status=CASE WHEN status IN ('cold','spam') THEN status ELSE 'new' END,
+               next_follow_up=NULL, updated_at=now() WHERE id=$1`, [leadId]);
+          await pool.query(
+            `INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'inbound',$2)`,
+            [leadId, 'they replied \u2014 ' + subject]);
+          threaded++;
+          continue;
+        }
+
+        const verdict = await classifyEmail(fromEmail, subject, body);
+        if (!verdict || !verdict.is_enquiry) { skipped++; continue; }
+
+        const r = await pool.query(
+          `INSERT INTO leads (received_at,form_name,name,email,message,raw,status,tag,
+                              intent,event_date,audience,urgency,organization,source)
+           VALUES ($1,$2,$3,$4,$5,$6,'new',$7,$8,$9,$10,$11,$12,'email') RETURNING id`,
+          [parsed.date || new Date(), 'Email \u00b7 ' + subject, fromName, fromEmail, body,
+           JSON.stringify({ source:'imap', messageId, subject }),
+           TAGS.includes(verdict.tag) ? verdict.tag : 'general',
+           verdict.intent || null, verdict.event_date || null, verdict.audience || null,
+           ['high','normal','low'].includes(verdict.urgency) ? verdict.urgency : 'normal',
+           verdict.organization || null]);
+        const leadId = r.rows[0].id;
+        await pool.query(
+          `INSERT INTO messages (lead_id,sent_at,to_email,from_email,subject,body,kind,direction,message_id)
+           VALUES ($1,$2,$3,$4,$5,$6,'reply','in',$7) ON CONFLICT (message_id) DO NOTHING`,
+          [leadId, parsed.date || new Date(), IMAP_USER, fromEmail, subject, body, messageId]);
+        await pool.query(
+          `INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'received',$2)`,
+          [leadId, 'by email \u2014 ' + subject]);
+        added++;
+      }
+    } finally { lock.release(); }
+    await client.logout();
+    return { ok:true, seen, added, threaded, skipped };
+  } catch (e) {
+    console.error('inbox read failed', e.message);
+    try { await client.logout(); } catch (x) {}
+    return { ok:false, error: String(e.message).slice(0, 200), seen, added, threaded };
+  }
+}
+
+app.post('/inbox/sync', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  res.json(await readInbox());
+});
+
+// Check her inbox on a schedule as well.
+if (canRead()) {
+  setInterval(() => { readInbox().catch(e => console.error('inbox poll', e.message)); },
+    Number(process.env.INBOX_POLL_MINUTES || 15) * 60 * 1000);
+  setTimeout(() => { readInbox().catch(() => {}); }, 90 * 1000);
+}
+
+app.get('/health', (req, res) => res.json({
+  ok: true, ai: !!AI_KEY, canSend: canSend(), canReadInbox: canRead() }));
 
 init().then(() => app.listen(PORT, () => console.log('listening on ' + PORT)))
       .catch(e => { console.error('startup failed', e); process.exit(1); });
