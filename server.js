@@ -362,11 +362,30 @@ function inferTag(formName, message) {
   return 'general';
 }
 
+// Webflow field labels vary per form: "Name", "Message Form - Name",
+// "Message/Email Address". Match on the meaningful part, not the whole label.
 function pick(fields, keys) {
-  for (const k of keys)
-    for (const a of Object.keys(fields))
-      if (a.toLowerCase() === k.toLowerCase() && fields[a])
+  const norm = x => String(x).toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+  const entries = Object.keys(fields)
+    .filter(a => fields[a] !== null && fields[a] !== undefined && String(fields[a]).trim() !== '')
+    .map(a => [a, norm(a)]);
+
+  for (const k of keys) {
+    const nk = norm(k);
+    for (const [a, na] of entries) if (na === nk) return String(fields[a]).trim();
+  }
+  for (const k of keys) {
+    const nk = norm(k);
+    for (const [a, na] of entries) {
+      const words = na.split(' ');
+      if (words.includes(nk) || na.endsWith(' ' + nk) || na.startsWith(nk + ' '))
         return String(fields[a]).trim();
+    }
+  }
+  for (const k of keys) {
+    const nk = norm(k);
+    for (const [a, na] of entries) if (na.includes(nk)) return String(fields[a]).trim();
+  }
   return null;
 }
 
@@ -379,7 +398,7 @@ app.post('/hook', async (req, res) => {
     const payload = (req.body && req.body.payload) || req.body || {};
     const fields = payload.data || payload.fields || {};
     const formName = payload.name || payload.formName || 'unknown';
-    const message = pick(fields, ['message','write about your project','event details','comments','notes']);
+    const message = pick(fields, ['write about your project','inquiry details','event details','your message','comments','notes','message']);
 
     // Honeypot is decided locally and is never overridden by the model.
     const hp = (fields.Website || fields.website || '').toString().trim();
@@ -415,7 +434,7 @@ app.post('/hook', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
       [formName, payload.pageUrl || null,
        pick(fields, ['name','full name','your name','first name']),
-       pick(fields, ['email','email address','e-mail']),
+       pick(fields, ['email','email address','e mail','email cta']),
        pick(fields, ['phone','phone number','telephone']),
        org, message, JSON.stringify(payload), spam, reason,
        spam ? 'spam' : 'new', tag, intent, eventDate, audience, urgency]
@@ -1656,8 +1675,8 @@ app.post('/import', async (req, res) => {
     const f = it.fields || {};
     const formName = it.form || 'unknown';
     const name  = pick(f, ['name','full name','your name','first name']);
-    const email = pick(f, ['email','email address','e-mail']);
-    const message = pick(f, ['message','write about your project','event details','comments','notes']);
+    const email = pick(f, ['email','email address','e mail','email cta']);
+    const message = pick(f, ['write about your project','inquiry details','event details','your message','comments','notes','message']);
 
     // Same submission twice is the same row.
     const dupe = await pool.query(
@@ -1715,7 +1734,7 @@ app.post('/import/webflow', async (req, res) => {
         if (dupe.rows.length) { skipped++; continue; }
 
         const name  = pick(f, ['name','full name','your name','first name']);
-        const message = pick(f, ['message','write about your project','event details','comments','notes']);
+        const message = pick(f, ['write about your project','inquiry details','event details','your message','comments','notes','message']);
         const t = triage(f, message);
         const machine = looksMachineGenerated(name);
         const guideOnly = /guide|email form/i.test(sub.displayName || '') && !message;
@@ -1728,7 +1747,7 @@ app.post('/import/webflow', async (req, res) => {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [sub.dateSubmitted || new Date().toISOString(),
            sub.displayName || 'unknown', sub.publishedPath || null, name,
-           pick(f, ['email','email address','e-mail']),
+           pick(f, ['email','email address','e mail','email cta']),
            pick(f, ['phone','phone number','telephone']),
            pick(f, ['organization','organisation','company']), message,
            JSON.stringify({ importId: sub.id, source: 'webflow', fields: f }),
@@ -2045,6 +2064,31 @@ app.post('/lead/:id/send', requireAuth, async (req, res) => {
     [id, 'to ' + lead.email]);
 
   res.redirect('/lead/' + id + '?msg=' + encodeURIComponent('Sent to ' + lead.email + '.'));
+});
+
+app.post('/reparse', async (req, res) => {
+  if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
+  const { rows } = await pool.query(
+    `SELECT id, raw, form_name FROM leads WHERE raw IS NOT NULL`);
+  let fixed = 0;
+  for (const r of rows) {
+    const f = (r.raw && (r.raw.fields || (r.raw.payload && r.raw.payload.data))) || {};
+    if (!Object.keys(f).length) continue;
+    const name = pick(f, ['name','full name','your name','first name']);
+    const email = pick(f, ['email','email address','e mail','email cta']);
+    const message = pick(f, ['write about your project','inquiry details','event details','your message','comments','notes','message']);
+    const org = pick(f, ['organization','organisation','company']);
+    const phone = pick(f, ['phone','phone number','telephone']);
+    if (!name && !email && !message && !org) continue;
+    await pool.query(
+      `UPDATE leads SET name=COALESCE(name,$1), email=COALESCE(email,$2),
+         message=COALESCE(message,$3), organization=COALESCE(organization,$4),
+         phone=COALESCE(phone,$5)
+       WHERE id=$6 AND (name IS NULL OR email IS NULL OR message IS NULL)`,
+      [name, email, message, org, phone, r.id]);
+    fixed++;
+  }
+  res.json({ ok: true, checked: rows.length, fixed });
 });
 
 app.get('/health', (req, res) => res.json({ ok: true, ai: !!AI_KEY }));
