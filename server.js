@@ -68,6 +68,8 @@ CREATE INDEX IF NOT EXISTS leads_follow_idx   ON leads (next_follow_up);
 CREATE INDEX IF NOT EXISTS leads_email_idx    ON leads (email);
 CREATE INDEX IF NOT EXISTS events_lead_idx    ON lead_events (lead_id, at DESC);
 
+DROP TABLE IF EXISTS briefs;
+
 CREATE TABLE IF NOT EXISTS engagements (
   id        TEXT PRIMARY KEY,
   name      TEXT NOT NULL,
@@ -102,7 +104,7 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 
 CREATE TABLE IF NOT EXISTS briefs (
-  day   DATE PRIMARY KEY,
+  day   TEXT PRIMARY KEY,
   body  TEXT NOT NULL,
   made  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -236,15 +238,28 @@ async function buildBrief() {
 
 async function todaysBrief() {
   if (!AI_KEY) return null;
-  const day = new Date().toISOString().slice(0, 10);
   try {
-    const cached = await pool.query('SELECT body FROM briefs WHERE day = $1', [day]);
+    // The key includes what is actually open, so the brief can never describe
+    // a state that has since changed.
+    const sig = await pool.query(`
+      SELECT count(*)::int AS open,
+             COALESCE(max(updated_at), now())::text AS touched
+        FROM leads WHERE is_spam = false AND status NOT IN ('booked','cold')`);
+    const open = sig.rows[0].open;
+    const key = new Date().toISOString().slice(0, 10) + '|' + open + '|' +
+                sig.rows[0].touched.slice(0, 16);
+
+    if (open === 0) return null;   // nothing open, nothing to brief
+
+    const cached = await pool.query('SELECT body FROM briefs WHERE day = $1', [key]);
     if (cached.rows.length) return cached.rows[0].body;
+
     const body = await buildBrief();
     if (!body) return null;
+    await pool.query('DELETE FROM briefs WHERE day <> $1', [key]);   // only ever one
     await pool.query(
       `INSERT INTO briefs (day, body) VALUES ($1,$2)
-       ON CONFLICT (day) DO UPDATE SET body = EXCLUDED.body, made = now()`, [day, body]);
+       ON CONFLICT (day) DO UPDATE SET body = EXCLUDED.body, made = now()`, [key, body]);
     return body;
   } catch (e) { console.error('brief failed', e); return null; }
 }
