@@ -372,9 +372,12 @@ app.post('/hook', async (req, res) => {
     let spam, reason, tag, intent = null, eventDate = null, audience = null, urgency = null;
     const ai = hp ? null : await aiClassify(formName, fields, message);
 
+    const guideOnly = /guide|email form/i.test(formName) && !message;
+
     if (ai) {
-      spam = hp ? true : !!ai.is_spam;
-      reason = hp ? 'honeypot filled' : (ai.spam_reason || null);
+      spam = hp ? true : (!!ai.is_spam || guideOnly);
+      reason = hp ? 'honeypot filled'
+             : (ai.spam_reason || (guideOnly ? 'guide signup, nothing to reply to' : null));
       tag = TAGS.includes(ai.tag) ? ai.tag : inferTag(formName, message);
       intent = ai.intent || null;
       eventDate = ai.event_date || null;
@@ -382,7 +385,8 @@ app.post('/hook', async (req, res) => {
       urgency = ['high','normal','low'].includes(ai.urgency) ? ai.urgency : 'normal';
     } else {
       const t = triage(fields, message);
-      spam = t.spam; reason = t.reason;
+      spam = t.spam || guideOnly;
+      reason = t.reason || (guideOnly ? 'guide signup, nothing to reply to' : null);
       tag = inferTag(formName, message);
       urgency = 'normal';
     }
@@ -1699,7 +1703,8 @@ app.post('/import/webflow', async (req, res) => {
         const message = pick(f, ['message','write about your project','event details','comments','notes']);
         const t = triage(f, message);
         const machine = looksMachineGenerated(name);
-        const spam = t.spam || machine;
+        const guideOnly = /guide|email form/i.test(sub.displayName || '') && !message;
+        const spam = t.spam || machine || guideOnly;
         if (spam) flagged++;
 
         await pool.query(
@@ -1712,7 +1717,8 @@ app.post('/import/webflow', async (req, res) => {
            pick(f, ['phone','phone number','telephone']),
            pick(f, ['organization','organisation','company']), message,
            JSON.stringify({ importId: sub.id, source: 'webflow', fields: f }),
-           spam, t.reason || (machine ? 'machine-generated name' : null),
+           spam, t.reason || (machine ? 'machine-generated name'
+              : guideOnly ? 'guide signup, nothing to reply to' : null),
            spam ? 'spam' : 'new', inferTag(sub.displayName, message)]);
         added++;
       }
@@ -1731,7 +1737,7 @@ app.post('/retriage', async (req, res) => {
   if (!HOOK_KEY || req.query.key !== HOOK_KEY) return res.status(401).json({ ok:false });
   // Only rows nobody has worked yet — never re-file something she has acted on.
   const { rows } = await pool.query(
-    `SELECT id, name, message, raw FROM leads
+    `SELECT id, name, message, raw, form_name FROM leads
       WHERE is_spam = false AND status = 'new' AND last_contacted IS NULL`);
   let moved = 0;
   for (const r of rows) {
@@ -1739,11 +1745,13 @@ app.post('/retriage', async (req, res) => {
     const t = triage(fields, r.message);
     const machine = looksMachineGenerated(r.name);
     const noName = !r.name && !r.message;   // a bare email with nothing else
-    if (t.spam || machine || noName) {
+    const guideOnly = /guide|email form/i.test(r.form_name || '') && !r.message;
+    if (t.spam || machine || noName || guideOnly) {
       await pool.query(
         `UPDATE leads SET is_spam=true, status='spam', spam_reason=$1, updated_at=now()
           WHERE id=$2`,
-        [t.reason || (machine ? 'machine-generated name' : 'no name and no message'), r.id]);
+        [t.reason || (machine ? 'machine-generated name'
+           : guideOnly ? 'guide signup, nothing to reply to' : 'no name and no message'), r.id]);
       moved++;
     }
   }
