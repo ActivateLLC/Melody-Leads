@@ -302,9 +302,15 @@ Answer her question using ONLY the data given to you. If the data does not conta
 say so plainly rather than guessing. Be brief: two or three sentences, plain language, no lists
 unless she asked for one. Never invent a name, number, date or organisation.
 
+You have no memory of anything you said before: every question arrives fresh, with only the
+data below. So never claim to remember an earlier answer, never apologise for an earlier
+answer, and never speculate about what you might have said. If she refers to something you
+supposedly told her, just say what the data shows now and leave it there.
+
 Return ONLY a JSON object, no prose, no code fences:
 {"answer": "...", "view": one of "due","new","contacted","booked","speaking","book","guide","all","spam" or null}
-Set "view" when looking at a particular list would help her act on the answer. Otherwise null.`;
+Set "view" only when that list actually has something in it and looking at it would help her
+act. If the relevant list is empty, set view to null.`;
 
 async function aiAsk(question) {
   const counts = await pool.query(`
