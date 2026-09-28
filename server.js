@@ -2184,7 +2184,7 @@ async function readInbox() {
           await pool.query(
             `INSERT INTO messages (lead_id,sent_at,to_email,from_email,subject,body,kind,direction,message_id)
              VALUES ($1,$2,$3,$4,$5,$6,'reply','in',$7)
-             ON CONFLICT (message_id) DO NOTHING`,
+             ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING`,
             [leadId, parsed.date || new Date(), IMAP_USER, fromEmail, subject, body, messageId]);
           await pool.query(
             `UPDATE leads SET status=CASE WHEN status IN ('cold','spam') THEN status ELSE 'new' END,
@@ -2212,7 +2212,7 @@ async function readInbox() {
         const leadId = r.rows[0].id;
         await pool.query(
           `INSERT INTO messages (lead_id,sent_at,to_email,from_email,subject,body,kind,direction,message_id)
-           VALUES ($1,$2,$3,$4,$5,$6,'reply','in',$7) ON CONFLICT (message_id) DO NOTHING`,
+           VALUES ($1,$2,$3,$4,$5,$6,'reply','in',$7) ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING`,
           [leadId, parsed.date || new Date(), IMAP_USER, fromEmail, subject, body, messageId]);
         await pool.query(
           `INSERT INTO lead_events (lead_id,kind,body) VALUES ($1,'received',$2)`,
