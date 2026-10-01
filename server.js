@@ -114,6 +114,16 @@ CREATE TABLE IF NOT EXISTS requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS event_files (
+  token      TEXT PRIMARY KEY,
+  event_id   TEXT NOT NULL,
+  filename   TEXT NOT NULL,
+  mime       TEXT NOT NULL,
+  bytes      BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS event_files_event_idx ON event_files (event_id);
+
 CREATE TABLE IF NOT EXISTS request_files (
   id         SERIAL PRIMARY KEY,
   request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
@@ -1851,12 +1861,16 @@ async function webflow(path, method, body) {
 
 app.get('/events', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM engagements ORDER BY starts_at DESC NULLS LAST');
+  const flyerRows = await pool.query(
+    'SELECT token, event_id, filename FROM event_files ORDER BY created_at DESC');
+  const flyersBy = {};
+  for (const f of flyerRows.rows) (flyersBy[f.event_id] ||= []).push(f);
   const today = new Date().toISOString().slice(0,10);
   const card = e => {
     const d = e.starts_at ? new Date(e.starts_at).toISOString().slice(0,10) : '';
     const past = d && d < today;
     return `<div class="card">
-      <form method="post" action="/events/save">
+      <form method="post" action="/events/save" enctype="multipart/form-data">
         <input type="hidden" name="id" value="${esc(e.id)}">
         <div class="meta">${past ? 'Past' : 'Upcoming'}</div>
         <div class="row"><input type="text" name="name" value="${esc(e.name)}"
@@ -1871,6 +1885,14 @@ app.get('/events', requireAuth, async (req, res) => {
         <div class="row"><input type="text" name="link" value="${esc(e.link||'')}"
           placeholder="Link for details" style="flex:1;min-width:14em"></div>
         <div class="row"><textarea name="notes" placeholder="Notes just for you">${esc(e.notes||'')}</textarea></div>
+        ${(flyersBy[e.id] || []).length ? `<div class="shots">${(flyersBy[e.id] || []).map(f =>
+          `<a href="/flyer/${f.token}" target="_blank" rel="noopener">
+             <img src="/flyer/${f.token}" alt="${esc(f.filename)}" loading="lazy"></a>`).join('')}</div>` : ''}
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <label class="uplabel">Flyer or poster</label>
+          <input type="file" name="flyer" accept="image/*" class="upfile">
+          <div class="uphint">Goes on your speaking page with the event.</div>
+        </div>
         <div class="row">
           <button class="btn" type="submit">Save</button>
           <button class="btn ghost" type="submit" formaction="/events/publish">Save &amp; put on my website</button>
@@ -1891,7 +1913,7 @@ app.get('/events', requireAuth, async (req, res) => {
         <h2>Add an engagement</h2>
         <p class="lede" style="color:var(--mid);font-size:.95rem">Anything you add here can be put
           straight onto your speaking page.</p>
-        <form method="post" action="/events/save">
+        <form method="post" action="/events/save" enctype="multipart/form-data">
           <div class="row"><input type="text" name="name" placeholder="Event name" required
             style="flex:1;min-width:14em"></div>
           <div class="row">
@@ -1904,6 +1926,11 @@ app.get('/events', requireAuth, async (req, res) => {
           <div class="row"><input type="text" name="link" placeholder="Link for details"
             style="flex:1;min-width:14em"></div>
           <div class="row"><textarea name="notes" placeholder="Notes just for you"></textarea></div>
+          <div class="row" style="flex-direction:column;align-items:stretch">
+            <label class="uplabel">Flyer or poster (optional)</label>
+            <input type="file" name="flyer" accept="image/*" class="upfile">
+            <div class="uphint">If you add one, it goes on your speaking page with the event.</div>
+          </div>
           <div class="row">
             <button class="btn" type="submit">Add</button>
             <button class="btn ghost" type="submit" formaction="/events/publish">Add &amp; put on my website</button>
@@ -1928,13 +1955,36 @@ async function saveEngagement(b) {
   return { id, startsAt };
 }
 
-app.post('/events/save', requireAuth, async (req, res) => {
-  await saveEngagement(req.body);
+async function storeFlyer(eventId, file) {
+  if (!file || !/^image\//.test(file.mimetype)) return null;
+  const token = crypto.randomBytes(16).toString('hex');
+  await pool.query('DELETE FROM event_files WHERE event_id=$1', [eventId]);  // one flyer per event
+  await pool.query(
+    `INSERT INTO event_files (token,event_id,filename,mime,bytes) VALUES ($1,$2,$3,$4,$5)`,
+    [token, eventId, String(file.originalname || 'flyer').slice(0, 200), file.mimetype, file.buffer]);
+  return token;
+}
+
+// Public on purpose: Webflow fetches the image by URL. The token is unguessable.
+app.get('/flyer/:token', async (req, res) => {
+  const t = String(req.params.token || '');
+  if (!/^[0-9a-f]{32}$/.test(t)) return res.status(400).send('bad token');
+  const { rows } = await pool.query('SELECT * FROM event_files WHERE token=$1', [t]);
+  if (!rows.length) return res.status(404).send('not found');
+  res.setHeader('Content-Type', rows[0].mime);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(rows[0].bytes);
+});
+
+app.post('/events/save', requireAuth, upload.single('flyer'), async (req, res) => {
+  const saved = await saveEngagement(req.body);
+  await storeFlyer(saved.id, req.file);
   res.redirect('/events?msg=' + encodeURIComponent('Saved. It is not on your website yet.'));
 });
 
-app.post('/events/publish', requireAuth, async (req, res) => {
+app.post('/events/publish', requireAuth, upload.single('flyer'), async (req, res) => {
   const { id, startsAt } = await saveEngagement(req.body);
+  await storeFlyer(id, req.file);
   if (!WEBFLOW_TOKEN) return res.redirect('/events?msg=' + encodeURIComponent('Saved here, but the website connection is not set up.'));
 
   const fieldData = {
@@ -1948,6 +1998,13 @@ app.post('/events/publish', requireAuth, async (req, res) => {
     hide: false
   };
 
+  const flyer = await pool.query(
+    'SELECT token FROM event_files WHERE event_id=$1 ORDER BY created_at DESC LIMIT 1', [id]);
+  if (flyer.rows.length) {
+    fieldData['cover-image'] =
+      { url: 'https://leads.melodyvachal.com/flyer/' + flyer.rows[0].token };
+  }
+
   let out;
   if (/^[0-9a-f]{24}$/.test(id)) {
     out = await webflow('/collections/' + EVENTS_COLLECTION + '/items/' + id, 'PATCH',
@@ -1958,6 +2015,8 @@ app.post('/events/publish', requireAuth, async (req, res) => {
     if (out.ok && out.data && out.data.id) {
       await pool.query('UPDATE engagements SET id=$1 WHERE id=$2', [out.data.id, id])
         .catch(() => {});
+      await pool.query('UPDATE event_files SET event_id=$1 WHERE event_id=$2',
+        [out.data.id, id]).catch(() => {});
     }
   }
   if (!out.ok) {
@@ -1973,6 +2032,7 @@ app.post('/events/remove', requireAuth, async (req, res) => {
   const id = String(req.body.id || '');
   if (!id) return res.redirect('/events');
   await pool.query('DELETE FROM engagements WHERE id=$1', [id]);
+  await pool.query('DELETE FROM event_files WHERE event_id=$1', [id]);
   let msg = 'Removed from your list.';
   if (/^[0-9a-f]{24}$/.test(id) && WEBFLOW_TOKEN) {
     const out = await webflow('/collections/' + EVENTS_COLLECTION + '/items/' + id, 'DELETE');
