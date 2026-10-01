@@ -1987,7 +1987,12 @@ app.post('/events/publish', requireAuth, upload.single('flyer'), async (req, res
   await storeFlyer(id, req.file);
   if (!WEBFLOW_TOKEN) return res.redirect('/events?msg=' + encodeURIComponent('Saved here, but the website connection is not set up.'));
 
+  const d = startsAt ? new Date(startsAt) : null;
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
   const fieldData = {
+    'day-number': d ? String(d.getUTCDate()) : null,
+    'month-short': d ? MONTHS[d.getUTCMonth()] : null,
     name: req.body.name || 'Untitled',
     slug: String(req.body.name || 'event').toLowerCase()
             .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'event',
